@@ -26,11 +26,27 @@ export type AuthStackParamList = {
   ForgotPasswordNew: { role: 'female' | 'male'; phone: string };
 };
 
-/** Female bottom-tabs. */
+/** Female bottom-tabs — order in nav is Earnings | Home (FAB) | Profile. */
 export type FemaleTabParamList = {
-  FemaleHome: undefined;
-  FemaleEarnings: undefined;
-  FemaleProfile: undefined;
+  Earnings: undefined;
+  Home: undefined;
+  Profile: undefined;
+};
+
+/** Female app stack — tabs as root + push-able secondary screens. */
+export type FemaleAppStackParamList = {
+  FemaleTabs: NavigatorScreenParams<FemaleTabParamList>;
+  Notifications: undefined;
+  ChangePassword: undefined;
+  BankUpiUpdate: undefined;
+  HelpSupport: undefined;
+  ReportIssue: undefined;
+  AboutApp: undefined;
+  Settings: undefined;
+  /** Placeholder for the payout flow shipped in a later prompt. */
+  PayoutRequest: undefined;
+  /** Placeholder for the delete-account flow shipped in a later prompt. */
+  DeleteAccount: undefined;
 };
 
 /** Male bottom-tabs. */
@@ -53,7 +69,7 @@ export type ChatStackParamList = {
 /** Top-level navigator selecting between Auth and the role-specific app shell. */
 export type RootStackParamList = {
   Auth: NavigatorScreenParams<AuthStackParamList>;
-  FemaleTabs: NavigatorScreenParams<FemaleTabParamList>;
+  FemaleApp: NavigatorScreenParams<FemaleAppStackParamList>;
   MaleTabs: NavigatorScreenParams<MaleTabParamList>;
   Chat: NavigatorScreenParams<ChatStackParamList>;
 };

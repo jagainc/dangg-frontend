@@ -40,11 +40,24 @@ export const linking: LinkingOptions<RootStackParamList> = {
           ForgotPasswordNew: 'auth/forgot-password/new-password',
         },
       },
-      FemaleTabs: {
+      FemaleApp: {
         screens: {
-          FemaleHome: 'female/home',
-          FemaleEarnings: 'female/earnings',
-          FemaleProfile: 'female/profile',
+          FemaleTabs: {
+            screens: {
+              Home: 'female/home',
+              Earnings: 'female/earnings',
+              Profile: 'female/profile',
+            },
+          },
+          Notifications: 'female/notifications',
+          ChangePassword: 'female/change-password',
+          BankUpiUpdate: 'female/bank-upi',
+          HelpSupport: 'female/help',
+          ReportIssue: 'female/report',
+          AboutApp: 'female/about',
+          Settings: 'female/settings',
+          PayoutRequest: 'female/payout-request',
+          DeleteAccount: 'female/delete-account',
         },
       },
       MaleTabs: {

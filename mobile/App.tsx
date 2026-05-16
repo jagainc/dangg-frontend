@@ -31,6 +31,7 @@ import RootNavigator from '@navigation/RootNavigator';
 import { useConnectivityStore } from '@store/connectivityStore';
 import { subscribeSupabaseAuth } from '@store/sessionStore';
 
+import IncomingChatRequestModal from '@features/chatRequests/components/IncomingChatRequestModal';
 import OfflineOverlay from '@features/common/OfflineOverlay';
 
 function App(): React.JSX.Element {
@@ -102,6 +103,7 @@ function App(): React.JSX.Element {
             <RootNavigator />
           </NavigationContainer>
         </OfflineOverlay>
+        <IncomingChatRequestModal />
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

@@ -35,3 +35,16 @@ export const TERMS_URL = 'https://dangg.app/terms';
 
 /** Deep-link URL prefix used by React Navigation linking config. */
 export const DEEP_LINK_PREFIX = 'dangg://';
+
+// --- Floating bottom nav (FemaleTabNavigator + future male tabs) --------
+export const BOTTOM_NAV_HEIGHT = 72;
+export const FAB_DIAMETER = 64;
+export const FAB_PROTRUSION = 32;
+export const NOTCH_WIDTH = 88;
+export const NOTCH_DEPTH = 30;
+
+// --- Chat request modal -------------------------------------------------
+export const CHAT_REQUEST_AUTO_DECLINE_S = 30;
+
+// --- Payouts ------------------------------------------------------------
+export const MIN_PAYOUT_AMOUNT_INR = 500;

@@ -30,7 +30,12 @@
       "PowerShell(Remove-Item *)",
       "Bash(./gradlew assembleDebug --console=plain)",
       "Bash(echo \"EXIT=$?\")",
-      "Bash(./gradlew installDebug -PreactNativeDevServerPort=8081)"
+      "Bash(./gradlew installDebug -PreactNativeDevServerPort=8081)",
+      "Bash(./gradlew installDebug --console=plain)",
+      "Bash(curl -sf http://localhost:8081/status)",
+      "Bash(echo \"===CURL_EXIT=$?===\")",
+      "Bash(npx react-native *)",
+      "Bash(curl -s http://localhost:8081/status)"
     ]
   }
 }

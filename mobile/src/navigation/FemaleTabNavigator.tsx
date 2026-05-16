@@ -1,38 +1,32 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import React from 'react';
 
-import BottomNav, { FEMALE_TABS } from '@core/components/BottomNav';
+import FloatingBottomNav from '@core/components/FloatingBottomNav';
 
-import { UserRole } from '@app-types/domain';
+import EarningsDashboardScreen from '@features/earnings/screens/EarningsDashboardScreen';
+import FemaleHomeScreen from '@features/femaleHome/screens/FemaleHomeScreen';
+import FemaleProfileScreen from '@features/profile/screens/FemaleProfileScreen';
 
-import PlaceholderScreen from './PlaceholderScreen';
 import { type FemaleTabParamList } from './types';
 
 const Tab = createBottomTabNavigator<FemaleTabParamList>();
 
-/** Female post-auth tabs: Home | Earnings | Profile. */
+/**
+ * Female post-auth bottom tabs.
+ *
+ * Order declared as Earnings → Home → Profile so the centered "speed-breaker"
+ * FAB rendered by `FloatingBottomNav` lands on Home. Initial route is Home.
+ */
 function FemaleTabNavigator(): React.ReactElement {
   return (
     <Tab.Navigator
-      initialRouteName="FemaleHome"
+      initialRouteName="Home"
       screenOptions={{ headerShown: false }}
-      tabBar={({ state, navigation }) => (
-        <BottomNav
-          role={UserRole.Female}
-          currentIndex={state.index}
-          onTabPress={i => {
-            const target = state.routeNames[i];
-            if (target) {
-              navigation.navigate(target);
-            }
-          }}
-          items={FEMALE_TABS}
-        />
-      )}
+      tabBar={props => <FloatingBottomNav {...props} />}
     >
-      <Tab.Screen name="FemaleHome" component={PlaceholderScreen} />
-      <Tab.Screen name="FemaleEarnings" component={PlaceholderScreen} />
-      <Tab.Screen name="FemaleProfile" component={PlaceholderScreen} />
+      <Tab.Screen name="Earnings" component={EarningsDashboardScreen} />
+      <Tab.Screen name="Home" component={FemaleHomeScreen} />
+      <Tab.Screen name="Profile" component={FemaleProfileScreen} />
     </Tab.Navigator>
   );
 }

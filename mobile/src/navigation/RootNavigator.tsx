@@ -7,7 +7,7 @@ import { UserRole } from '@app-types/domain';
 
 import AuthNavigator from './AuthNavigator';
 import ChatNavigator from './ChatNavigator';
-import FemaleTabNavigator from './FemaleTabNavigator';
+import FemaleAppStack from './FemaleAppStack';
 import MaleTabNavigator from './MaleTabNavigator';
 import { type RootStackParamList } from './types';
 
@@ -18,7 +18,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
  *
  * Reads session + role from Zustand:
  *   * No session  → Auth flow (splash → onboarding → signup/login).
- *   * Session + female → FemaleTabs.
+ *   * Session + female → FemaleAppStack (tabs + push-able secondary screens).
  *   * Session + male  → MaleTabs.
  *
  * Chat navigator is registered so any post-auth flow can push into it.
@@ -32,7 +32,7 @@ function RootNavigator(): React.ReactElement {
       {!authed ? (
         <Stack.Screen name="Auth" component={AuthNavigator} />
       ) : role === UserRole.Female ? (
-        <Stack.Screen name="FemaleTabs" component={FemaleTabNavigator} />
+        <Stack.Screen name="FemaleApp" component={FemaleAppStack} />
       ) : (
         <Stack.Screen name="MaleTabs" component={MaleTabNavigator} />
       )}
