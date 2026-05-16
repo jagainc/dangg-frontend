@@ -49,14 +49,39 @@ export type FemaleAppStackParamList = {
   DeleteAccount: undefined;
 };
 
-/** Male bottom-tabs. */
+/** Male bottom-tabs — order in nav is Wallet | Home (FAB) | Profile. */
 export type MaleTabParamList = {
-  MaleWallet: undefined;
-  MaleHome: undefined;
-  MaleProfile: undefined;
+  Wallet: undefined;
+  Home: undefined;
+  Profile: undefined;
 };
 
-/** Chat-request flow (Phase 1 only). */
+/** Male app stack — tabs as root + push-able secondary screens. */
+export type MaleAppStackParamList = {
+  MaleTabs: NavigatorScreenParams<MaleTabParamList>;
+  FemaleProfilePreview: { femaleId: string };
+  ChatRequestSent: { requestId: string };
+  ChatRequestAccepted: { requestId: string };
+  ChatRequestDeclined: { requestId: string };
+  ChatRequestTimeout: { requestId: string };
+  PaymentProcessing: { packageId: string };
+  PaymentSuccess: {
+    transactionId: string;
+    coinsAdded: number;
+    bonusCoins: number;
+    amountInr: number;
+    newBalance: number;
+  };
+  PaymentFailed: { packageId: string; reason: string };
+  Notifications: undefined;
+  ChangePassword: undefined;
+  HelpSupport: undefined;
+  ReportIssue: undefined;
+  AboutApp: undefined;
+  Settings: undefined;
+};
+
+/** Chat-request flow (Phase 1 only). Placeholder for the Phase 2 chat screen. */
 export type ChatStackParamList = {
   ChatRequestSent: { femaleId: string };
   ChatRequestAccepted: { femaleId: string };
@@ -70,7 +95,7 @@ export type ChatStackParamList = {
 export type RootStackParamList = {
   Auth: NavigatorScreenParams<AuthStackParamList>;
   FemaleApp: NavigatorScreenParams<FemaleAppStackParamList>;
-  MaleTabs: NavigatorScreenParams<MaleTabParamList>;
+  MaleApp: NavigatorScreenParams<MaleAppStackParamList>;
   Chat: NavigatorScreenParams<ChatStackParamList>;
 };
 

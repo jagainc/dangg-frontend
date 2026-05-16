@@ -60,11 +60,29 @@ export const linking: LinkingOptions<RootStackParamList> = {
           DeleteAccount: 'female/delete-account',
         },
       },
-      MaleTabs: {
+      MaleApp: {
         screens: {
-          MaleWallet: 'male/wallet',
-          MaleHome: 'male/home',
-          MaleProfile: 'male/profile',
+          MaleTabs: {
+            screens: {
+              Wallet: 'male/wallet',
+              Home: 'male/home',
+              Profile: 'male/profile',
+            },
+          },
+          FemaleProfilePreview: 'male/female/:femaleId',
+          ChatRequestSent: 'male/request/sent/:requestId',
+          ChatRequestAccepted: 'male/request/accepted/:requestId',
+          ChatRequestDeclined: 'male/request/declined/:requestId',
+          ChatRequestTimeout: 'male/request/timeout/:requestId',
+          PaymentProcessing: 'male/payment/processing/:packageId',
+          PaymentSuccess: 'male/payment/success',
+          PaymentFailed: 'male/payment/failed',
+          Notifications: 'male/notifications',
+          ChangePassword: 'male/change-password',
+          HelpSupport: 'male/help',
+          ReportIssue: 'male/report',
+          AboutApp: 'male/about',
+          Settings: 'male/settings',
         },
       },
       Chat: {

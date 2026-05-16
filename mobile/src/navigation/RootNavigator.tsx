@@ -8,7 +8,7 @@ import { UserRole } from '@app-types/domain';
 import AuthNavigator from './AuthNavigator';
 import ChatNavigator from './ChatNavigator';
 import FemaleAppStack from './FemaleAppStack';
-import MaleTabNavigator from './MaleTabNavigator';
+import MaleAppStack from './MaleAppStack';
 import { type RootStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -34,7 +34,7 @@ function RootNavigator(): React.ReactElement {
       ) : role === UserRole.Female ? (
         <Stack.Screen name="FemaleApp" component={FemaleAppStack} />
       ) : (
-        <Stack.Screen name="MaleTabs" component={MaleTabNavigator} />
+        <Stack.Screen name="MaleApp" component={MaleAppStack} />
       )}
       <Stack.Screen name="Chat" component={ChatNavigator} />
     </Stack.Navigator>

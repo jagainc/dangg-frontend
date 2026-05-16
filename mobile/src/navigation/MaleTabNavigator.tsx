@@ -1,38 +1,77 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import React from 'react';
+import Svg, { Path } from 'react-native-svg';
 
-import BottomNav, { MALE_TABS } from '@core/components/BottomNav';
+import FloatingBottomNav from '@core/components/FloatingBottomNav';
 
-import { UserRole } from '@app-types/domain';
+import MaleHomeScreen from '@features/maleHome/screens/MaleHomeScreen';
+import MaleProfileScreen from '@features/profile/screens/MaleProfileScreen';
+import WalletScreen from '@features/wallet/screens/WalletScreen';
 
-import PlaceholderScreen from './PlaceholderScreen';
 import { type MaleTabParamList } from './types';
 
 const Tab = createBottomTabNavigator<MaleTabParamList>();
 
-/** Male post-auth tabs: Wallet | Home | Profile. */
+type IconProps = { color: string; size: number };
+
+function WalletTabIcon({ color, size }: IconProps): React.ReactElement {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M21 18v1c0 1.1-.9 2-2 2H5c-1.11 0-2-.9-2-2V5c0-1.1.89-2 2-2h14c1.1 0 2 .9 2 2v1h-9c-1.11 0-2 .9-2 2v8c0 1.1.89 2 2 2h9zm-9-2h10V8H12v8zm4-2.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"
+        fill={color}
+      />
+    </Svg>
+  );
+}
+
+function HomeTabIcon({ color, size }: IconProps): React.ReactElement {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z" fill={color} />
+    </Svg>
+  );
+}
+
+function PersonTabIcon({ color, size }: IconProps): React.ReactElement {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"
+        fill={color}
+      />
+    </Svg>
+  );
+}
+
+/**
+ * Male post-auth bottom tabs.
+ *
+ * Order declared as Wallet → Home → Profile so the centered "speed-breaker"
+ * FAB rendered by `FloatingBottomNav` lands on Home. Initial route is Home.
+ */
 function MaleTabNavigator(): React.ReactElement {
   return (
     <Tab.Navigator
-      initialRouteName="MaleHome"
+      initialRouteName="Home"
       screenOptions={{ headerShown: false }}
-      tabBar={({ state, navigation }) => (
-        <BottomNav
-          role={UserRole.Male}
-          currentIndex={state.index}
-          onTabPress={i => {
-            const target = state.routeNames[i];
-            if (target) {
-              navigation.navigate(target);
-            }
-          }}
-          items={MALE_TABS}
-        />
-      )}
+      tabBar={props => <FloatingBottomNav {...props} />}
     >
-      <Tab.Screen name="MaleWallet" component={PlaceholderScreen} />
-      <Tab.Screen name="MaleHome" component={PlaceholderScreen} />
-      <Tab.Screen name="MaleProfile" component={PlaceholderScreen} />
+      <Tab.Screen
+        name="Wallet"
+        component={WalletScreen}
+        options={{ tabBarLabel: 'Wallet', tabBarIcon: WalletTabIcon }}
+      />
+      <Tab.Screen
+        name="Home"
+        component={MaleHomeScreen}
+        options={{ tabBarLabel: 'Home', tabBarIcon: HomeTabIcon }}
+      />
+      <Tab.Screen
+        name="Profile"
+        component={MaleProfileScreen}
+        options={{ tabBarLabel: 'Profile', tabBarIcon: PersonTabIcon }}
+      />
     </Tab.Navigator>
   );
 }
