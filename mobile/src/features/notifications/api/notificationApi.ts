@@ -1,7 +1,7 @@
 /**
  * Notifications inbox API. Empty until the backend is wired.
  */
-import { Env } from '@core/config/env';
+import { USE_MOCK_DATA } from '@core/config/env';
 import { mapSupabaseError } from '@core/network/apiErrorMapper';
 import { getSupabaseClient } from '@core/network/supabaseClient';
 
@@ -15,6 +15,20 @@ export type AppNotification = {
   read: boolean;
   occurredAt: Date;
 };
+
+/** Maps the DB `notifications.type` enum to the UI's coarse NotificationKind. */
+function kindFromType(type: string): NotificationKind {
+  if (type.startsWith('chat_request')) {
+    return 'chatRequest';
+  }
+  if (type.startsWith('payout') || type.startsWith('payment')) {
+    return 'paymentReceived';
+  }
+  if (type.startsWith('verification')) {
+    return 'verificationUpdate';
+  }
+  return 'system';
+}
 
 const MOCK_NOTIFICATIONS: AppNotification[] = [
   {
@@ -53,22 +67,31 @@ const MOCK_NOTIFICATIONS: AppNotification[] = [
 
 /** Returns all notifications, newest first. */
 export async function listNotifications(): Promise<ReadonlyArray<AppNotification>> {
-  if (Env.devMode) {
+  if (USE_MOCK_DATA) {
     return [...MOCK_NOTIFICATIONS].sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime());
   }
   const { data, error } = await getSupabaseClient()
     .from('notifications')
-    .select('*')
-    .order('occurred_at', { ascending: false });
+    .select('id, type, title, body, is_read, created_at')
+    .order('created_at', { ascending: false });
   if (error) {
     throw mapSupabaseError(error);
   }
-  return (data ?? []) as AppNotification[];
+  return (data ?? []).map(
+    (n): AppNotification => ({
+      id: n.id as string,
+      kind: kindFromType(n.type as string),
+      title: (n.title as string) ?? '',
+      body: (n.body as string) ?? '',
+      read: Boolean(n.is_read),
+      occurredAt: new Date(n.created_at as string),
+    }),
+  );
 }
 
 /** Mark a single notification as read (optimistic). */
 export async function markRead(id: string): Promise<void> {
-  if (Env.devMode) {
+  if (USE_MOCK_DATA) {
     const found = MOCK_NOTIFICATIONS.find(n => n.id === id);
     if (found) {
       found.read = true;
@@ -77,7 +100,7 @@ export async function markRead(id: string): Promise<void> {
   }
   const { error } = await getSupabaseClient()
     .from('notifications')
-    .update({ read: true })
+    .update({ is_read: true, read_at: new Date().toISOString() })
     .eq('id', id);
   if (error) {
     throw mapSupabaseError(error);
@@ -86,7 +109,7 @@ export async function markRead(id: string): Promise<void> {
 
 /** Mark every unread notification as read. */
 export async function markAllRead(): Promise<void> {
-  if (Env.devMode) {
+  if (USE_MOCK_DATA) {
     MOCK_NOTIFICATIONS.forEach(n => {
       n.read = true;
     });
@@ -94,8 +117,8 @@ export async function markAllRead(): Promise<void> {
   }
   const { error } = await getSupabaseClient()
     .from('notifications')
-    .update({ read: true })
-    .eq('read', false);
+    .update({ is_read: true, read_at: new Date().toISOString() })
+    .eq('is_read', false);
   if (error) {
     throw mapSupabaseError(error);
   }

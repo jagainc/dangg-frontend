@@ -2,6 +2,7 @@ import { type RouteProp, useNavigation, useRoute } from '@react-navigation/nativ
 import { type NativeStackNavigationProp } from '@react-navigation/native-stack';
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  AppState,
   BackHandler,
   KeyboardAvoidingView,
   Platform,
@@ -33,8 +34,20 @@ import { AppSpacing } from '@theme/spacing';
 import { AppTypography } from '@theme/typography';
 
 import CoinIcon from '@core/components/CoinIcon';
+import { USE_MOCK_DATA } from '@core/config/env';
+import { getSupabaseClient } from '@core/network/supabaseClient';
+import { logger } from '@core/utils/logger';
 
 import { type MaleAppStackParamList } from '@navigation/types';
+
+import {
+  type ChatMessage,
+  endChatSession,
+  getChatSessionForRequest,
+  getChatSessionStatus,
+  listChatMessages,
+  sendChatMessage,
+} from '../api/chatRequestApi';
 
 type Nav = NativeStackNavigationProp<MaleAppStackParamList, 'ChatSession'>;
 type Route = RouteProp<MaleAppStackParamList, 'ChatSession'>;
@@ -81,6 +94,19 @@ const MOCK_MESSAGES: ReadonlyArray<MockMessage> = [
 
 const MOCK_FEMALE_NAME = 'Priya';
 const COINS_PER_MESSAGE = 5;
+
+function formatMessageTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function mapChatMessage(message: ChatMessage, selfId: string): MockMessage {
+  return {
+    id: message.id,
+    kind: message.senderId === selfId ? 'sent' : 'received',
+    text: message.body,
+    time: formatMessageTime(message.sentAt),
+  };
+}
 
 // ─── Icons ───────────────────────────────────────────────────────────────────
 
@@ -137,6 +163,17 @@ function TypingIndicator(): React.ReactElement {
 
 // ─── Message bubble ───────────────────────────────────────────────────────────
 
+function DoubleCheckIcon({ size = 12, color = 'rgba(255,255,255,0.7)' }): React.ReactElement {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17l-4.24-4.24-1.41 1.41 5.66 5.66L23.66 7l-1.42-1.41zM.41 13.41L6.07 19.07l1.41-1.41L1.83 12 .41 13.41z"
+        fill={color}
+      />
+    </Svg>
+  );
+}
+
 function MessageBubble({ msg, index }: { msg: MockMessage; index: number }): React.ReactElement {
   const opacity = useSharedValue(0);
   const tx = useSharedValue(msg.kind === 'sent' ? 20 : -20);
@@ -167,9 +204,12 @@ function MessageBubble({ msg, index }: { msg: MockMessage; index: number }): Rea
         >
           {msg.text}
         </Text>
-        <Text style={[styles.timeText, isSent ? styles.timeTextSent : styles.timeTextReceived]}>
-          {msg.time}
-        </Text>
+        <View style={styles.bubbleTimeRow}>
+          <Text style={[styles.timeText, isSent ? styles.timeTextSent : styles.timeTextReceived]}>
+            {msg.time}
+          </Text>
+          {isSent ? <DoubleCheckIcon /> : null}
+        </View>
       </View>
     </Animated.View>
   );
@@ -182,11 +222,14 @@ function ChatHeader({
   secondsElapsed,
   coinsSpent,
   onBack,
+  isLive,
 }: {
   name: string;
   secondsElapsed: number;
   coinsSpent: number;
   onBack: () => void;
+  /** Live session shows the running timer; an ended (history) chat does not. */
+  isLive: boolean;
 }): React.ReactElement {
   const mm = String(Math.floor(secondsElapsed / 60)).padStart(2, '0');
   const ss = String(secondsElapsed % 60).padStart(2, '0');
@@ -203,11 +246,15 @@ function ChatHeader({
           <View style={styles.femaleAvatar}>
             <Text style={styles.femaleAvatarText}>{name[0]}</Text>
           </View>
-          <View style={styles.onlineDot} />
+          {isLive ? <View style={styles.onlineDot} /> : null}
         </View>
         <View>
           <Text style={styles.headerName}>{name}</Text>
-          <Text style={styles.headerOnline}>Online • {`${mm}:${ss}`}</Text>
+          {isLive ? (
+            <Text style={styles.headerOnline}>Online • {`${mm}:${ss}`}</Text>
+          ) : (
+            <Text style={styles.headerEnded}>Chat ended</Text>
+          )}
         </View>
       </View>
 
@@ -265,18 +312,30 @@ function AnimatedStar({ scale, filled, onPress }: AnimatedStarProps): React.Reac
  */
 function ChatSessionScreen(): React.ReactElement {
   const navigation = useNavigation<Nav>();
-  useRoute<Route>();
+  const route = useRoute<Route>();
 
   const scrollRef = useRef<ScrollView>(null);
   const [inputText, setInputText] = useState('');
-  const [messages, setMessages] = useState<MockMessage[]>([...MOCK_MESSAGES]);
-  const [isTyping, setIsTyping] = useState(true);
+  const [messages, setMessages] = useState<MockMessage[]>(USE_MOCK_DATA ? [...MOCK_MESSAGES] : []);
+  const [isTyping, setIsTyping] = useState(USE_MOCK_DATA);
   const [secondsElapsed, setSecondsElapsed] = useState(0);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [selfId, setSelfId] = useState<string | null>(null);
+  // True only while the session is active. Old chats opened from the inbox/
+  // history load as ended → read-only transcript, no timer, no time limit.
+  const [isLive, setIsLive] = useState(true);
 
   const [chatEndState, setChatEndState] = useState<'active' | 'confirm' | 'rating' | 'success'>(
     'active',
   );
   const [rating, setRating] = useState(0);
+
+  // Mirror chatEndState into a ref so the message-poll closure (created once in
+  // the bootstrap effect) reads the latest value. `remoteEndRef` is invoked by
+  // the poll when the OTHER participant ends the session.
+  const chatEndStateRef = useRef(chatEndState);
+  chatEndStateRef.current = chatEndState;
+  const remoteEndRef = useRef<() => void>(() => undefined);
 
   // Animated values for modal container
   const backdropOpacity = useSharedValue(0);
@@ -317,6 +376,24 @@ function ChatSessionScreen(): React.ReactElement {
       withTiming(0.95, { duration: 100 }),
       withSpring(1, { damping: 12 }),
     );
+    setChatEndState('rating');
+    // End the session for BOTH participants. The other side's poll sees
+    // status='ended' and disconnects too. Fire-and-forget; idempotent.
+    if (!USE_MOCK_DATA && sessionId) {
+      void endChatSession(sessionId).catch(e => logger.warn('endChatSession failed', e));
+    }
+  };
+
+  // Invoked by the poll when the OTHER participant ended the chat: open the
+  // rating modal so this user is disconnected the same way. No-op if this user
+  // is already mid-end (so the ender doesn't double-trigger off their own end).
+  remoteEndRef.current = (): void => {
+    if (chatEndStateRef.current !== 'active') {
+      return;
+    }
+    backdropOpacity.value = withTiming(1, { duration: 300 });
+    cardScale.value = withSpring(1, { damping: 15, stiffness: 120 });
+    cardTranslateY.value = withSpring(0, { damping: 15, stiffness: 120 });
     setChatEndState('rating');
   };
 
@@ -375,15 +452,18 @@ function ChatSessionScreen(): React.ReactElement {
   // Intercept back gesture/press
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      // Old chat (read-only history): let the OS pop the screen normally.
+      if (!isLive) {
+        return false;
+      }
       if (chatEndState === 'active') {
         handleInitiateEndChat();
-        return true;
       }
       return true;
     });
     return () => sub.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatEndState]);
+  }, [chatEndState, isLive]);
 
   const backdropAnimatedStyle = useAnimatedStyle(() => ({
     opacity: backdropOpacity.value,
@@ -510,30 +590,189 @@ function ChatSessionScreen(): React.ReactElement {
     }
   };
 
-  // Session timer
+  // Session timer — runs ONLY for a live session. An old chat viewed from
+  // history has no time limit, so there is no countdown.
   useEffect(() => {
+    if (!isLive) {
+      return;
+    }
     const t = setInterval(() => setSecondsElapsed(s => s + 1), 1000);
     return () => clearInterval(t);
-  }, []);
+  }, [isLive]);
+
+  // End the LIVE session when the app is backgrounded/closed — best-effort,
+  // runs while JS is still alive on a graceful close. A hard force-kill (no JS)
+  // is caught instead by the backend sweep_stale_chat_sessions cron. The other
+  // participant sees status='ended' (poll/Realtime) and disconnects too.
+  useEffect(() => {
+    if (!isLive || !sessionId) {
+      return;
+    }
+    const sub = AppState.addEventListener('change', next => {
+      if (next === 'background') {
+        void endChatSession(sessionId).catch(e => logger.warn('end-on-background failed', e));
+      }
+    });
+    return () => sub.remove();
+  }, [isLive, sessionId]);
+
+  useEffect(() => {
+    if (USE_MOCK_DATA) {
+      return;
+    }
+
+    let mounted = true;
+    let channel: ReturnType<ReturnType<typeof getSupabaseClient>['channel']> | null = null;
+    let poll: ReturnType<typeof setInterval> | null = null;
+    const client = getSupabaseClient();
+
+    async function bootstrap(): Promise<void> {
+      const { data: userData } = await client.auth.getUser();
+      const currentUserId = userData.user?.id;
+      if (!currentUserId) {
+        return;
+      }
+
+      const session = await getChatSessionForRequest(route.params.requestId);
+      if (!session || !mounted) {
+        return;
+      }
+
+      setSelfId(currentUserId);
+      setSessionId(session.id);
+
+      const history = await listChatMessages(session.id);
+      if (!mounted) {
+        return;
+      }
+      setMessages(history.map(message => mapChatMessage(message, currentUserId)));
+      setIsLive(session.status === 'active');
+
+      // Old chat opened from history (already ended): show a read-only
+      // transcript and stop. No realtime/poll — and crucially no end-detection,
+      // which would otherwise see status='ended' and pop the rating modal.
+      if (session.status !== 'active') {
+        return;
+      }
+
+      channel = client
+        .channel(`public:chat_messages:chat_session_id=eq.${session.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'chat_messages',
+            filter: `chat_session_id=eq.${session.id}`,
+          },
+          payload => {
+            const row = payload.new as {
+              id: string;
+              chat_session_id: string;
+              sender_id: string;
+              body: string;
+              sent_at: string;
+            };
+            const next = mapChatMessage(
+              {
+                id: row.id,
+                sessionId: row.chat_session_id,
+                senderId: row.sender_id,
+                body: row.body,
+                sentAt: row.sent_at,
+              },
+              currentUserId,
+            );
+            setMessages(prev =>
+              prev.some(message => message.id === next.id) ? prev : [...prev, next],
+            );
+          },
+        )
+        .subscribe();
+
+      // Polling fallback: this local stack's Realtime pipeline does not reliably
+      // deliver postgres_changes, so the realtime INSERT above can silently miss
+      // the other participant's messages. Re-fetch the history every few seconds
+      // and merge anything new (deduped by DB id — sent messages already carry
+      // their real id, so this never duplicates). Guarantees both sides converge.
+      poll = setInterval(() => {
+        void (async () => {
+          if (!mounted) {
+            return;
+          }
+          try {
+            const latest = await listChatMessages(session.id);
+            if (!mounted) {
+              return;
+            }
+            setMessages(prev => {
+              const seen = new Set(prev.map(m => m.id));
+              const additions = latest
+                .filter(m => !seen.has(m.id))
+                .map(m => mapChatMessage(m, currentUserId));
+              return additions.length > 0 ? [...prev, ...additions] : prev;
+            });
+            // If the other participant ended the session, disconnect this side too.
+            const status = await getChatSessionStatus(session.id);
+            if (mounted && status === 'ended') {
+              remoteEndRef.current();
+            }
+          } catch (e) {
+            logger.warn('ChatSessionScreen message poll failed', e);
+          }
+        })();
+      }, 2500);
+    }
+
+    void bootstrap();
+
+    return () => {
+      mounted = false;
+      if (channel) {
+        void client.removeChannel(channel);
+      }
+      if (poll) {
+        clearInterval(poll);
+      }
+    };
+  }, [route.params.requestId]);
 
   const coinsSpent = messages.filter(m => m.kind === 'sent').length * COINS_PER_MESSAGE;
 
-  const handleSend = (): void => {
+  const handleSend = async (): Promise<void> => {
     const text = inputText.trim();
     if (!text) {
       return;
     }
+    if (!USE_MOCK_DATA && (!sessionId || !selfId)) {
+      return;
+    }
+
     const newMsg: MockMessage = {
       id: String(Date.now()),
       kind: 'sent',
       text,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
-    setMessages(prev => [...prev, newMsg]);
     setInputText('');
-    setIsTyping(true);
 
-    // Mock female response after 1.8s
+    if (!USE_MOCK_DATA) {
+      try {
+        const inserted = await sendChatMessage(sessionId!, text);
+        const mapped = mapChatMessage(inserted, selfId!);
+        setMessages(prev =>
+          prev.some(message => message.id === mapped.id) ? prev : [...prev, mapped],
+        );
+        setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+      } catch (e) {
+        logger.warn('Failed to send chat message:', e);
+        setInputText(text);
+      }
+      return;
+    }
+
+    setMessages(prev => [...prev, newMsg]);
+    setIsTyping(true);
     setTimeout(() => {
       setIsTyping(false);
       const replies = [
@@ -558,16 +797,18 @@ function ChatSessionScreen(): React.ReactElement {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      {/* DEV MODE banner */}
-      <View style={styles.devBanner}>
-        <Text style={styles.devBannerText}>⚡ DEV MODE — Mock Chat UI</Text>
-      </View>
+      {USE_MOCK_DATA ? (
+        <View style={styles.devBanner}>
+          <Text style={styles.devBannerText}>DEV MODE - Mock Chat UI</Text>
+        </View>
+      ) : null}
 
       <ChatHeader
         name={MOCK_FEMALE_NAME}
         secondsElapsed={secondsElapsed}
         coinsSpent={coinsSpent}
-        onBack={handleInitiateEndChat}
+        isLive={isLive}
+        onBack={isLive ? handleInitiateEndChat : () => navigation.goBack()}
       />
 
       <KeyboardAvoidingView
@@ -575,11 +816,13 @@ function ChatSessionScreen(): React.ReactElement {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}
       >
-        {/* Coin cost pill */}
-        <View style={styles.coinPill}>
-          <CoinIcon size={12} />
-          <Text style={styles.coinPillText}>{COINS_PER_MESSAGE} coins per message</Text>
-        </View>
+        {/* Coin cost pill — live session only */}
+        {isLive ? (
+          <View style={styles.coinPill}>
+            <CoinIcon size={12} />
+            <Text style={styles.coinPillText}>{COINS_PER_MESSAGE} coins per message</Text>
+          </View>
+        ) : null}
 
         {/* Messages */}
         <ScrollView
@@ -606,26 +849,36 @@ function ChatSessionScreen(): React.ReactElement {
           ) : null}
         </ScrollView>
 
-        {/* Input bar */}
-        <View style={[styles.inputBar, AppShadows.e2]}>
-          <TextInput
-            style={styles.input}
-            value={inputText}
-            onChangeText={setInputText}
-            placeholder="Type a message…"
-            placeholderTextColor={AppColors.onSurfaceMuted}
-            multiline
-            maxLength={200}
-            onSubmitEditing={handleSend}
-            returnKeyType="send"
-          />
-          <Pressable
-            onPress={handleSend}
-            style={({ pressed }) => [styles.sendBtn, pressed && styles.sendBtnPressed]}
-          >
-            <SendIcon />
-          </Pressable>
-        </View>
+        {/* Composer — live session only. An ended chat is a read-only transcript. */}
+        {isLive ? (
+          <View style={[styles.inputBar, AppShadows.e2]}>
+            <TextInput
+              style={styles.input}
+              value={inputText}
+              onChangeText={setInputText}
+              placeholder="Type a message…"
+              placeholderTextColor={AppColors.onSurfaceMuted}
+              multiline
+              maxLength={200}
+              onSubmitEditing={() => {
+                void handleSend();
+              }}
+              returnKeyType="send"
+            />
+            <Pressable
+              onPress={() => {
+                void handleSend();
+              }}
+              style={({ pressed }) => [styles.sendBtn, pressed && styles.sendBtnPressed]}
+            >
+              <SendIcon />
+            </Pressable>
+          </View>
+        ) : (
+          <View style={styles.endedFooter}>
+            <Text style={styles.endedFooterText}>This chat has ended</Text>
+          </View>
+        )}
       </KeyboardAvoidingView>
 
       {/* Exit Modal Overlay */}
@@ -720,18 +973,35 @@ const styles = StyleSheet.create({
     color: AppColors.success,
     fontWeight: '600',
   },
+  headerEnded: {
+    ...AppTypography.labelSmall,
+    color: AppColors.onSurfaceMuted,
+    fontWeight: '600',
+  },
+  endedFooter: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: AppSpacing.md,
+    backgroundColor: AppColors.surface,
+    borderTopWidth: 1,
+    borderTopColor: AppColors.border,
+  },
+  endedFooterText: {
+    ...AppTypography.bodySmall,
+    color: AppColors.onSurfaceMuted,
+  },
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
+    gap: 4,
     backgroundColor: AppColors.primarySubtle,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: AppRadii.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: AppRadii.full,
   },
   coinsSpentText: {
     ...AppTypography.labelSmall,
-    color: AppColors.primaryDark,
+    color: AppColors.primary,
     fontWeight: '700',
   },
 
@@ -747,8 +1017,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: AppRadii.full,
-    borderWidth: 1,
-    borderColor: AppColors.border,
+    borderWidth: 0,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.02,
+    shadowRadius: 6,
+    elevation: 1,
   },
   coinPillText: {
     ...AppTypography.labelSmall,
@@ -791,27 +1065,23 @@ const styles = StyleSheet.create({
   bubbleSent: {
     backgroundColor: AppColors.primary,
     borderBottomRightRadius: 4,
-    shadowColor: AppColors.primary,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.22,
-    shadowRadius: 6,
-    elevation: 4,
   },
   bubbleReceived: {
-    backgroundColor: AppColors.surface,
+    backgroundColor: AppColors.surfaceVariant, // clean neutral light-gray background
     borderBottomLeftRadius: 4,
-    borderWidth: 1,
-    borderColor: AppColors.primaryLight,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
+    borderWidth: 0, // borderless
   },
   bubbleText: { ...AppTypography.bodyMedium, lineHeight: 20 },
   bubbleTextSent: { color: AppColors.onPrimary },
   bubbleTextReceived: { color: AppColors.onSurface },
-  timeText: { ...AppTypography.labelSmall, fontSize: 10, alignSelf: 'flex-end' },
+  bubbleTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    gap: 4,
+    marginTop: 2,
+  },
+  timeText: { ...AppTypography.labelSmall, fontSize: 10 },
   timeTextSent: { color: 'rgba(255,255,255,0.65)' },
   timeTextReceived: { color: AppColors.onSurfaceMuted },
 
@@ -819,23 +1089,27 @@ const styles = StyleSheet.create({
   typingBubble: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    backgroundColor: AppColors.surface,
+    gap: 6,
+    backgroundColor: AppColors.surfaceVariant,
     borderRadius: AppRadii.lg,
     borderBottomLeftRadius: 4,
-    borderWidth: 1,
-    borderColor: AppColors.primaryLight,
+    borderWidth: 0,
     paddingHorizontal: AppSpacing.md,
     paddingVertical: AppSpacing.sm + 2,
     alignSelf: 'flex-start',
     marginTop: AppSpacing.xs,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.02,
+    shadowRadius: 6,
+    elevation: 1,
   },
   typingDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: AppColors.primary,
-    opacity: 0.7,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: AppColors.onSurfaceMuted,
+    opacity: 0.6,
   },
 
   // Input bar
@@ -844,21 +1118,23 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     paddingHorizontal: AppSpacing.md,
     paddingVertical: AppSpacing.sm,
-    backgroundColor: AppColors.surface,
+    backgroundColor: AppColors.background,
     gap: AppSpacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: AppColors.border,
   },
   input: {
     flex: 1,
     minHeight: 44,
     maxHeight: 100,
-    backgroundColor: AppColors.background,
+    backgroundColor: AppColors.surface,
     borderRadius: AppRadii.xl,
     paddingHorizontal: AppSpacing.md,
     paddingVertical: AppSpacing.sm,
-    borderWidth: 1.5,
-    borderColor: AppColors.primaryLight,
+    borderWidth: 0,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.02,
+    shadowRadius: 10,
+    elevation: 2,
     ...AppTypography.bodyMedium,
     color: AppColors.onSurface,
   },

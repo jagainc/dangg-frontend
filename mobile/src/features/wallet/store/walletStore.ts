@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 
-import { Env } from '@core/config/env';
+import { USE_MOCK_DATA } from '@core/config/env';
 
 type WalletState = {
   /** Current coin balance. Shared across Home pill, Wallet hero, request flows. */
@@ -27,9 +27,9 @@ type WalletState = {
  */
 export const useWalletStore = create<WalletState>()(
   subscribeWithSelector((set, get) => ({
-    coinBalance: Env.devMode ? 500 : 0,
-    totalCoinsPurchased: Env.devMode ? 1000 : 0,
-    chatsStarted: Env.devMode ? 14 : 0,
+    coinBalance: USE_MOCK_DATA ? 500 : 0,
+    totalCoinsPurchased: USE_MOCK_DATA ? 1000 : 0,
+    chatsStarted: USE_MOCK_DATA ? 14 : 0,
 
     setBalance: (next): void => set({ coinBalance: Math.max(0, next) }),
 

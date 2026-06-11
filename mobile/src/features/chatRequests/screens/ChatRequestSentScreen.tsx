@@ -22,7 +22,7 @@ import { AppSpacing } from '@theme/spacing';
 import { AppTypography } from '@theme/typography';
 
 import ConfirmationDialog from '@core/components/ConfirmationDialog';
-import { Env } from '@core/config/env';
+import { USE_MOCK_DATA } from '@core/config/env';
 import { duration as fmtDuration } from '@core/utils/formatters';
 import { logger } from '@core/utils/logger';
 
@@ -336,7 +336,7 @@ function ChatRequestSentScreen(): React.ReactElement {
 
   // DEV MODE: auto-accept after 5 s so the full flow can be tested
   useEffect(() => {
-    if (!Env.devMode) {
+    if (!USE_MOCK_DATA) {
       return;
     }
     const timer = setTimeout(() => routeForOutcome('accepted'), 5000);

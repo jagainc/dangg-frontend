@@ -21,13 +21,13 @@ import Card from '@core/components/Card';
 import OtpInput, { type OtpInputHandle } from '@core/components/OtpInput';
 import TextButton from '@core/components/TextButton';
 import { OTP_LOCKOUT_S, OTP_MAX_ATTEMPTS, OTP_RESEND_COOLDOWN_S } from '@core/config/constants';
-import { Env } from '@core/config/env';
 import { AppException, InvalidOtpException } from '@core/network/apiException';
 import { logger } from '@core/utils/logger';
 
 import { type AuthStackParamList } from '@navigation/types';
 
-import { type AuthIntent, sendOtp, verifyOtp } from '../../api/authApi';
+import { type AuthIntent, sendOtp, setInitialPassword, verifyOtp } from '../../api/authApi';
+import { useSignupDraftStore } from '../../store/signupDraftStore';
 
 type OtpRouteName = 'FemaleSignupOtp' | 'MaleSignupOtp' | 'ForgotPasswordOtp';
 type OtpRoute = RouteProp<AuthStackParamList, OtpRouteName>;
@@ -152,6 +152,18 @@ function OtpVerificationScreen(): React.ReactElement {
       setVerifying(true);
       try {
         await verifyOtp(phone, code, intent);
+        // The OTP only proves phone ownership — it is NOT the password.
+        // Set the signup password exactly once, here, on the session that
+        // verifyOtp just created. (Male sets it here too now; the duplicate
+        // set at the end of MaleOnboardingCarousel was removed to avoid a
+        // `same_password` error.) setInitialPassword is idempotent, so a
+        // re-run with the same password is a no-op rather than an error.
+        if (routeName === 'FemaleSignupOtp' || routeName === 'MaleSignupOtp') {
+          const { password } = useSignupDraftStore.getState();
+          if (password) {
+            await setInitialPassword(password);
+          }
+        }
         const next = nextRouteFor(routeName, route.params);
         // Reset the stack so users can't swipe back into the OTP screen.
         navigation.reset({
@@ -192,15 +204,6 @@ function OtpVerificationScreen(): React.ReactElement {
       verifying,
     ],
   );
-
-  useEffect(() => {
-    if (Env.devMode) {
-      const timer = setTimeout(() => {
-        handleCompleted('123456');
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [handleCompleted]);
 
   const handleResend = useCallback(async (): Promise<void> => {
     if (resendIn > 0 || lockoutIn > 0) {

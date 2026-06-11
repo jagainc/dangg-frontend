@@ -1,6 +1,7 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React from 'react';
 
+import ChatsInboxScreen from '@features/chatRequests/screens/ChatsInboxScreen';
 import FemaleChatRequestAcceptedScreen from '@features/chatRequests/screens/FemaleChatRequestAcceptedScreen';
 import FemaleChatSessionScreen from '@features/chatRequests/screens/FemaleChatSessionScreen';
 import NotificationPermissionPrimerScreen from '@features/common/NotificationPermissionPrimerScreen';
@@ -30,6 +31,7 @@ function FemaleAppStack(): React.ReactElement {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
       <Stack.Screen name="FemaleTabs" component={FemaleTabNavigator} />
+      <Stack.Screen name="ChatsInbox" component={ChatsInboxScreen} />
       <Stack.Screen name="Notifications" component={NotificationsScreen} />
       <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
       <Stack.Screen name="BankUpiUpdate" component={FemaleBankUpiUpdateScreen} />

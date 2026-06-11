@@ -66,7 +66,7 @@ function FaceCaptureScreen(): React.ReactElement {
   }, []);
 
   const handleCapture = useCallback(async (): Promise<void> => {
-    if (Env.devMode && !cameraRef.current) {
+    if ((Env.devMode || __DEV__) && !cameraRef.current) {
       setCaptureError(null);
       setPreviewPath(
         'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=600',

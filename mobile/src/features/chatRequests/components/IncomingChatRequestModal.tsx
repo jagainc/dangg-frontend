@@ -9,6 +9,7 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import Svg, { Path } from 'react-native-svg';
 
 import { AppColors } from '@theme/colors';
 import { AppRadii } from '@theme/radii';
@@ -17,6 +18,7 @@ import { AppSpacing } from '@theme/spacing';
 import { AppTypography } from '@theme/typography';
 
 import Avatar from '@core/components/Avatar';
+import CoinIcon from '@core/components/CoinIcon';
 import PrimaryButton from '@core/components/PrimaryButton';
 import SecondaryButton from '@core/components/SecondaryButton';
 import { CHAT_REQUEST_AUTO_DECLINE_S } from '@core/config/constants';
@@ -236,21 +238,61 @@ function IncomingChatRequestModal(): React.ReactElement | null {
           <View style={styles.accentStrip} />
           <View style={styles.body}>
             <Text style={styles.eyebrow}>Incoming Chat Request</Text>
-            <View style={styles.avatarRing}>
-              <Avatar
-                uri={displayRequest.requesterAvatarUrl}
-                size={96}
-                initials={initialsFromName(displayRequest.requesterName)}
+
+            <View style={styles.avatarContainer}>
+              <View style={styles.avatarRing}>
+                <Avatar
+                  uri={displayRequest.requesterAvatarUrl}
+                  size={96}
+                  initials={initialsFromName(displayRequest.requesterName)}
+                />
+              </View>
+              {/* Pulsing online status dot */}
+              <View
+                style={[styles.statusIndicatorDot, { backgroundColor: AppColors.onlineGreen }]}
               />
             </View>
+
             <Text style={styles.name}>{displayRequest.requesterName}</Text>
-            <Text
-              style={styles.info}
-            >{`Sending ${displayRequest.coinAmount} coins for this chat`}</Text>
+
+            {/* Sender Metadata Row */}
+            <View style={styles.metaRow}>
+              <View style={styles.metaItem}>
+                <Svg width={14} height={14} viewBox="0 0 24 24" style={styles.metaIcon}>
+                  <Path
+                    d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"
+                    fill={AppColors.coinGold}
+                  />
+                </Svg>
+                <Text
+                  style={styles.metaText}
+                >{`${displayRequest.requesterRating ?? 4.8} Rating`}</Text>
+              </View>
+              <View style={styles.metaDivider} />
+              <View style={styles.metaItem}>
+                <Svg width={14} height={14} viewBox="0 0 24 24" style={styles.metaIcon}>
+                  <Path
+                    d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"
+                    fill={AppColors.primary}
+                  />
+                </Svg>
+                <Text
+                  style={styles.metaText}
+                >{`${displayRequest.requesterTotalChats ?? 24} Chats`}</Text>
+              </View>
+            </View>
+
+            {/* Premium Coin Offer Badge */}
+            <View style={styles.offerBadge}>
+              <CoinIcon size={20} />
+              <Text style={styles.offerText}>{`Offers ${displayRequest.coinAmount} Coins`}</Text>
+            </View>
+
             <Text style={styles.countdown}>
               {'Auto-declines in '}
               <Text style={styles.countdownBold}>{formatCountdown(secondsLeft)}</Text>
             </Text>
+
             <View style={styles.actions}>
               <View style={styles.actionHalf}>
                 <SecondaryButton
@@ -299,24 +341,72 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
-  avatarRing: {
+  avatarContainer: {
+    position: 'relative',
     marginTop: AppSpacing.md,
+  },
+  avatarRing: {
     padding: 3,
     borderRadius: 999,
     borderWidth: 3,
     borderColor: AppColors.primary,
   },
+  statusIndicatorDot: {
+    position: 'absolute',
+    bottom: 2,
+    right: 2,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 3,
+    borderColor: AppColors.surface,
+  },
   name: {
     ...AppTypography.headlineMedium,
-    color: AppColors.primaryDark,
+    color: AppColors.onSurface,
+    fontWeight: '700',
     textAlign: 'center',
     marginTop: AppSpacing.md,
   },
-  info: {
-    ...AppTypography.bodyMedium,
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: AppSpacing.sm,
+    gap: AppSpacing.md,
+  },
+  metaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  metaIcon: {
+    opacity: 0.9,
+  },
+  metaText: {
+    ...AppTypography.labelSmall,
     color: AppColors.onSurfaceMuted,
-    textAlign: 'center',
-    marginTop: 4,
+    fontWeight: '600',
+  },
+  metaDivider: {
+    width: 1,
+    height: 12,
+    backgroundColor: AppColors.border,
+  },
+  offerBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: AppColors.primarySubtle,
+    paddingHorizontal: AppSpacing.md,
+    paddingVertical: AppSpacing.xs + 2,
+    borderRadius: AppRadii.full,
+    marginTop: AppSpacing.md,
+    gap: 6,
+  },
+  offerText: {
+    ...AppTypography.labelLarge,
+    color: AppColors.primary,
+    fontWeight: '700',
   },
   countdown: {
     ...AppTypography.bodyMedium,

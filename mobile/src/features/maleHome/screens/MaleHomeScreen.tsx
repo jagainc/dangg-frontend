@@ -26,7 +26,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Circle, Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
+import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 
 import { AppColors } from '@theme/colors';
 import { AppRadii } from '@theme/radii';
@@ -39,6 +39,7 @@ import CoinIcon from '@core/components/CoinIcon';
 import PaginationLoader from '@core/components/PaginationLoader';
 import PrimaryButton from '@core/components/PrimaryButton';
 import { BOTTOM_NAV_HEIGHT, FAB_PROTRUSION } from '@core/config/constants';
+import { useRealtimeChannel } from '@core/hooks/useRealtimeChannel';
 import { logger } from '@core/utils/logger';
 
 import { type MaleAppStackParamList } from '@navigation/types';
@@ -60,8 +61,7 @@ import {
 } from '../api/maleHomeApi';
 import AvailableFemaleCard from '../components/AvailableFemaleCard';
 import FemaleSearchFilterSheet from '../components/FemaleSearchFilterSheet';
-import FilterChip from '../components/FilterChip';
-import { type QuickFilter, useFemaleFiltersStore } from '../store/femaleFiltersStore';
+import { useFemaleFiltersStore } from '../store/femaleFiltersStore';
 
 type Nav = NativeStackNavigationProp<MaleAppStackParamList>;
 
@@ -72,32 +72,23 @@ const GRID_GAP = AppSpacing.sm + 4;
 const CARD_WIDTH = (SCREEN_WIDTH - GRID_HORIZONTAL_PADDING * 2 - GRID_GAP) / 2;
 const PAGE_SIZE = 20;
 
-const QUICK_FILTERS: ReadonlyArray<{ value: QuickFilter; label: string; showDot?: boolean }> = [
-  { value: 'all', label: 'All' },
-  { value: 'online', label: 'Online', showDot: true },
-  { value: 'new', label: 'New' },
-  { value: 'topRated', label: 'Highly Rated' },
-  { value: 'favorites', label: 'Favorites' },
-];
-
-function BellIcon({ withDot }: { withDot: boolean }): React.ReactElement {
-  return (
-    <Svg width={24} height={24} viewBox="0 0 24 24">
-      <Path
-        d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"
-        fill={AppColors.primaryDark}
-      />
-      {withDot ? <Circle cx={18} cy={6} r={4} fill={AppColors.error} /> : null}
-    </Svg>
-  );
-}
-
 function FilterIcon(): React.ReactElement {
   return (
     <Svg width={22} height={22} viewBox="0 0 24 24">
       <Path
         d="M4.25 5.61C6.27 8.2 10 13 10 13v6c0 .55.45 1 1 1h2c.55 0 1-.45 1-1v-6s3.72-4.8 5.74-7.39A1 1 0 0 0 18.95 4H5.04a1 1 0 0 0-.79 1.61z"
         fill={AppColors.primary}
+      />
+    </Svg>
+  );
+}
+
+function ChatsIcon(): React.ReactElement {
+  return (
+    <Svg width={24} height={24} viewBox="0 0 24 24">
+      <Path
+        d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"
+        fill={AppColors.primaryDark}
       />
     </Svg>
   );
@@ -215,7 +206,6 @@ function MaleHomeScreen(): React.ReactElement {
 
   const coinBalance = useCoinBalance();
   const filters = useFemaleFiltersStore();
-  const setQuick = useFemaleFiltersStore(s => s.setQuick);
   const activeFilterCount = useFemaleFiltersStore(s => s.activeCount)();
 
   const [items, setItems] = useState<ReadonlyArray<AvailableFemale>>([]);
@@ -342,10 +332,15 @@ function MaleHomeScreen(): React.ReactElement {
     setSubmitting(true);
     try {
       spend(selectedFavorite.coinPrice);
-      const { requestId } = await sendChatRequest({
+      const { requestId, newCoinBalance } = await sendChatRequest({
         femaleId: selectedFavorite.id,
         coinCost: selectedFavorite.coinPrice,
       });
+      // Reconcile the optimistic spend with the server's authoritative balance
+      // (the backend may have auto-granted a dev top-up to cover the cost).
+      if (newCoinBalance !== null) {
+        useWalletStore.getState().setBalance(newCoinBalance);
+      }
       setConfirmOpen(false);
       handleCloseGenie();
       navigation.navigate('ChatRequestSent', { requestId });
@@ -463,10 +458,44 @@ function MaleHomeScreen(): React.ReactElement {
     void loadFavorites();
   }, [loadFavorites]);
 
+  useRealtimeChannel(
+    'male_home_females_realtime',
+    channel =>
+      channel.on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'females',
+        },
+        payload => {
+          logger.info('Realtime update on females table:', payload);
+          void loadFirstPage();
+          void loadFavorites();
+        },
+      ),
+    [loadFirstPage, loadFavorites],
+  );
+
   useFocusEffect(
     useCallback(() => {
       fetchWalletSnapshot().catch(e => logger.warn('Wallet snapshot failed', e));
     }, []),
+  );
+
+  // Live presence refresh. This stack's Realtime doesn't deliver `females`
+  // changes, so the realtime channel above can't update the grid on its own.
+  // While this screen is focused, re-fetch the discovery list on an interval so
+  // a female toggling availability appears/disappears on her own — no manual
+  // pull-to-refresh. Stops on blur/unmount.
+  useFocusEffect(
+    useCallback(() => {
+      const id = setInterval(() => {
+        void loadFirstPage();
+        void loadFavorites();
+      }, 5000);
+      return () => clearInterval(id);
+    }, [loadFirstPage, loadFavorites]),
   );
 
   const handleRefresh = useCallback(async (): Promise<void> => {
@@ -563,46 +592,14 @@ function MaleHomeScreen(): React.ReactElement {
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Notifications"
+            accessibilityLabel="Chats"
             hitSlop={12}
-            onPress={() => navigation.navigate('Notifications')}
-            style={styles.bellWrap}
+            onPress={() => navigation.navigate('ChatsInbox')}
+            style={styles.chatsButton}
           >
-            <BellIcon withDot />
+            <ChatsIcon />
           </Pressable>
         </View>
-      </View>
-
-      <View style={styles.chipRow}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipScroll}
-        >
-          {QUICK_FILTERS.map(f => (
-            <FilterChip
-              key={f.value}
-              label={f.label}
-              active={filters.quick === f.value}
-              onPress={() => setQuick(f.value)}
-              leadingDotColor={f.showDot ? AppColors.onlineGreen : undefined}
-            />
-          ))}
-        </ScrollView>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Filter and sort"
-          onPress={() => setFilterSheetOpen(true)}
-          style={styles.filterIconWrap}
-          hitSlop={8}
-        >
-          <FilterIcon />
-          {activeFilterCount > 0 ? (
-            <View style={styles.filterBadge}>
-              <Text style={styles.filterBadgeText}>{String(activeFilterCount)}</Text>
-            </View>
-          ) : null}
-        </Pressable>
       </View>
 
       <FlashList<AvailableFemale>
@@ -648,6 +645,20 @@ function MaleHomeScreen(): React.ReactElement {
             ) : null}
 
             <View style={styles.availableHeader}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Filter and sort"
+                onPress={() => setFilterSheetOpen(true)}
+                style={styles.filterIconWrap}
+                hitSlop={8}
+              >
+                <FilterIcon />
+                {activeFilterCount > 0 ? (
+                  <View style={styles.filterBadge}>
+                    <Text style={styles.filterBadgeText}>{String(activeFilterCount)}</Text>
+                  </View>
+                ) : null}
+              </Pressable>
               <Text style={styles.availableTitle}>Available Now</Text>
               <Text style={styles.availableCount}>{`(${totalOnline} online)`}</Text>
             </View>
@@ -915,15 +926,7 @@ const styles = StyleSheet.create({
     color: AppColors.primaryDark,
     fontWeight: '700',
   },
-  bellWrap: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
-  chipRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingRight: AppSpacing.md,
-    marginTop: AppSpacing.sm,
-    marginBottom: AppSpacing.md,
-  },
-  chipScroll: { paddingHorizontal: AppSpacing.md, gap: AppSpacing.xs, alignItems: 'center' },
+  chatsButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   filterIconWrap: {
     width: 36,
     height: 36,
@@ -999,11 +1002,11 @@ const styles = StyleSheet.create({
   },
   availableHeader: {
     flexDirection: 'row',
-    alignItems: 'baseline',
+    alignItems: 'center',
     paddingHorizontal: 0,
     marginTop: AppSpacing.lg,
     marginBottom: AppSpacing.sm,
-    gap: 6,
+    gap: 8,
   },
   availableTitle: {
     ...AppTypography.titleMedium,

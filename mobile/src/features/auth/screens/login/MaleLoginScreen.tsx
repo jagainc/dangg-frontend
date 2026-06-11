@@ -24,7 +24,7 @@ import Card from '@core/components/Card';
 import PrimaryButton from '@core/components/PrimaryButton';
 import TextButton from '@core/components/TextButton';
 import TextField from '@core/components/TextField';
-import { Env } from '@core/config/env';
+import { USE_MOCK_DATA } from '@core/config/env';
 import { AppException } from '@core/network/apiException';
 import { logger } from '@core/utils/logger';
 import { ZodSchemas } from '@core/utils/validators';
@@ -65,7 +65,7 @@ function MaleLoginScreen(): React.ReactElement {
     setInlineError(null);
     const cleanedPhone = data.phone.replace(/\D/g, '').slice(-10);
     try {
-      if (Env.devMode) {
+      if (USE_MOCK_DATA) {
         await signInWithPasswordDev(cleanedPhone, data.password, UserRole.Male);
       } else {
         await signInWithPassword(cleanedPhone, data.password);

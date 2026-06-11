@@ -110,7 +110,7 @@ function FloatingBottomNav({
 
   const containerPaddingBottom = insets.bottom + 8;
   const barWidth = width - 48; // horizontal margin of 24 on each side
-  const tabWidth = barWidth / 3;
+  const tabWidth = barWidth / Math.max(1, state.routes.length);
 
   const baseIndicatorLeft = (tabWidth - INDICATOR_WIDTH) / 2;
 
@@ -205,19 +205,18 @@ const styles = StyleSheet.create({
   pillBar: {
     height: BAR_HEIGHT,
     borderRadius: BAR_HEIGHT / 2,
-    backgroundColor: AppColors.surface,
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
     flexDirection: 'row',
     alignItems: 'center',
     position: 'relative',
     maxWidth: 600, // prevent overly wide layouts on tablets
-    // Soft glowing pink shadow
-    shadowColor: AppColors.primary,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.18,
-    shadowRadius: 16,
+    // Premium soft floating shadow
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.06,
+    shadowRadius: 20,
     elevation: 8,
-    borderWidth: 1.5,
-    borderColor: AppColors.primaryLight,
+    borderWidth: 0,
   },
   tabButton: {
     flex: 1,

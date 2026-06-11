@@ -6,6 +6,7 @@ import ChatRequestDeclinedScreen from '@features/chatRequests/screens/ChatReques
 import ChatRequestSentScreen from '@features/chatRequests/screens/ChatRequestSentScreen';
 import ChatRequestTimeoutScreen from '@features/chatRequests/screens/ChatRequestTimeoutScreen';
 import ChatSessionScreen from '@features/chatRequests/screens/ChatSessionScreen';
+import ChatsInboxScreen from '@features/chatRequests/screens/ChatsInboxScreen';
 import LikeDislikeRatingScreen from '@features/chatRequests/screens/LikeDislikeRatingScreen';
 import NotificationPermissionPrimerScreen from '@features/common/NotificationPermissionPrimerScreen';
 import FemaleProfilePreviewScreen from '@features/maleHome/screens/FemaleProfilePreviewScreen';
@@ -35,6 +36,7 @@ function MaleAppStack(): React.ReactElement {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
       <Stack.Screen name="MaleTabs" component={MaleTabNavigator} />
+      <Stack.Screen name="ChatsInbox" component={ChatsInboxScreen} />
       <Stack.Screen name="FemaleProfilePreview" component={FemaleProfilePreviewScreen} />
       <Stack.Screen name="ChatRequestSent" component={ChatRequestSentScreen} />
       <Stack.Screen

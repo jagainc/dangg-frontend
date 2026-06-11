@@ -2,9 +2,9 @@
  * Earnings + transactions data for the female Earnings dashboard.
  *
  * Returns empty/zero values until the backend is wired. Production hits the
- * `payouts` + `transactions` tables and the `female_payout_details` row.
+ * `payouts` + `coin_transactions` tables and the `payout_details` row.
  */
-import { Env } from '@core/config/env';
+import { USE_MOCK_DATA } from '@core/config/env';
 import { mapSupabaseError } from '@core/network/apiErrorMapper';
 import { AppException } from '@core/network/apiException';
 import { getSupabaseClient } from '@core/network/supabaseClient';
@@ -89,7 +89,7 @@ const mockTransactionsList: Transaction[] = [
 
 /** Available + pending balances and trend stats for the Earnings hero. */
 export async function getEarningsBalance(): Promise<EarningsBalance> {
-  if (Env.devMode) {
+  if (USE_MOCK_DATA) {
     return {
       availableInr: mockAvailableBalance,
       pendingPayoutInr: mockPendingPayout,
@@ -109,7 +109,7 @@ export async function getEarningsBalance(): Promise<EarningsBalance> {
 export async function listTransactions(
   filter: TransactionFilter = 'all',
 ): Promise<ReadonlyArray<Transaction>> {
-  if (Env.devMode) {
+  if (USE_MOCK_DATA) {
     if (filter === 'all') {
       return mockTransactionsList;
     }
@@ -126,12 +126,24 @@ export async function listTransactions(
   if (error) {
     throw mapSupabaseError(error);
   }
-  return (data ?? []) as Transaction[];
+  // The view returns JSON, so date/number fields arrive as strings — map them
+  // to real types. Without this `occurredAt` is a string and the UI crashes on
+  // `occurredAt.getTime()` (TransactionItem).
+  const rows = (data ?? []) as ReadonlyArray<Record<string, unknown>>;
+  return rows.map(row => ({
+    id: String(row.id),
+    kind: row.kind as TransactionKind,
+    title: (row.title as string | null) ?? '',
+    subtitle: (row.subtitle as string | null) ?? '',
+    amountInr: row.amountInr != null ? Number(row.amountInr) : 0,
+    status: (row.status as TransactionStatus | null) ?? 'completed',
+    occurredAt: new Date((row.occurredAt as string | number) ?? Date.now()),
+  }));
 }
 
 /** Submits a payout request. Returns the new payout id. */
 export async function requestPayout(amountInr: number): Promise<string> {
-  if (Env.devMode) {
+  if (USE_MOCK_DATA) {
     const payoutId = `payout-${Date.now()}`;
     mockAvailableBalance -= amountInr;
     mockPendingPayout = amountInr;
@@ -157,22 +169,26 @@ export async function requestPayout(amountInr: number): Promise<string> {
 
     return payoutId;
   }
-  const { data, error } = await getSupabaseClient()
-    .from('payouts')
-    .insert({ amount_inr: amountInr, status: 'pending' })
-    .select('id')
-    .single();
+  const { data, error } = await getSupabaseClient().functions.invoke('payouts-request', {
+    body: { coinsToWithdraw: amountInr },
+  });
   if (error) {
     throw mapSupabaseError(error);
   }
-  const id = (data as { id?: string }).id;
+  const id = (data as { payoutId?: string }).payoutId;
   if (!id) {
     throw new AppException('SERVER', 'Payout created without an id');
   }
   return id;
 }
 
-/** Updates the saved bank/UPI payout details. */
+/**
+ * Updates the saved bank/UPI payout details. Writes to the real
+ * `payout_details` table (NOT `female_payout_details` — that table never
+ * existed) with its actual columns, scoped to the caller via RLS. Upsert on
+ * `female_id` so editing replaces the single row; the unused side's columns
+ * are cleared so switching bank↔UPI doesn't leave stale data.
+ */
 export async function updatePayoutDetails(payload: {
   kind: 'bank' | 'upi';
   holderName?: string;
@@ -180,10 +196,33 @@ export async function updatePayoutDetails(payload: {
   ifsc?: string;
   upiId?: string;
 }): Promise<void> {
-  if (Env.devMode) {
+  if (USE_MOCK_DATA) {
     return;
   }
-  const { error } = await getSupabaseClient().from('female_payout_details').upsert(payload);
+  const client = getSupabaseClient();
+  const { data: userData, error: userErr } = await client.auth.getUser();
+  if (userErr || !userData.user) {
+    throw mapSupabaseError(userErr ?? new Error('You must be signed in'));
+  }
+  const row =
+    payload.kind === 'bank'
+      ? {
+          female_id: userData.user.id,
+          method: 'bank',
+          account_holder_name: payload.holderName?.trim() ?? null,
+          account_number: payload.accountNumber ?? null,
+          ifsc_code: payload.ifsc?.toUpperCase() ?? null,
+          upi_id: null,
+        }
+      : {
+          female_id: userData.user.id,
+          method: 'upi',
+          upi_id: payload.upiId?.trim() ?? null,
+          account_holder_name: null,
+          account_number: null,
+          ifsc_code: null,
+        };
+  const { error } = await client.from('payout_details').upsert(row, { onConflict: 'female_id' });
   if (error) {
     throw mapSupabaseError(error);
   }
@@ -195,15 +234,35 @@ export async function getPayoutDetails(): Promise<
   | { kind: 'upi'; upiId: string }
   | null
 > {
-  if (Env.devMode) {
+  if (USE_MOCK_DATA) {
     return { kind: 'upi', upiId: 'aanya@okaxis' };
   }
   const { data, error } = await getSupabaseClient()
-    .from('female_payout_details')
-    .select('*')
+    .from('payout_details')
+    .select('method, account_holder_name, account_number, ifsc_code, upi_id')
     .maybeSingle();
   if (error) {
     throw mapSupabaseError(error);
   }
-  return (data as Awaited<ReturnType<typeof getPayoutDetails>>) ?? null;
+  if (!data) {
+    return null;
+  }
+  const row = data as {
+    method: 'bank' | 'upi';
+    account_holder_name: string | null;
+    account_number: string | null;
+    ifsc_code: string | null;
+    upi_id: string | null;
+  };
+  if (row.method === 'upi') {
+    return { kind: 'upi', upiId: row.upi_id ?? '' };
+  }
+  const acct = row.account_number ?? '';
+  const masked = acct.length > 4 ? `••••${acct.slice(-4)}` : acct;
+  return {
+    kind: 'bank',
+    holderName: row.account_holder_name ?? '',
+    accountNumberMasked: masked,
+    ifsc: row.ifsc_code ?? '',
+  };
 }

@@ -7,16 +7,21 @@ import { AppRadii } from '@theme/radii';
 import { AppSpacing } from '@theme/spacing';
 import { AppTypography } from '@theme/typography';
 
-import CoinIcon from '@core/components/CoinIcon';
-
 import { type Transaction } from '../api/earningsApi';
 
 export type TransactionItemProps = {
   item: Transaction;
 };
 
-function relativeShort(date: Date): string {
-  const minutes = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60000));
+function relativeShort(input: Date | string | number): string {
+  // Defensive: callers should pass a Date, but data crossing the API boundary
+  // can arrive as an ISO string — coerce so the render can never crash.
+  const date = input instanceof Date ? input : new Date(input);
+  const ms = date.getTime();
+  if (Number.isNaN(ms)) {
+    return '';
+  }
+  const minutes = Math.max(0, Math.floor((Date.now() - ms) / 60000));
   if (minutes < 1) {
     return 'just now';
   }
@@ -136,9 +141,8 @@ function TransactionItem({ item }: TransactionItemProps): React.ReactElement {
       </View>
       <View style={styles.amountWrap}>
         <Text style={[styles.amount, { color: visual.amountColor }]}>
-          {`${visual.amountPrefix}${item.amountInr.toLocaleString()}`}
+          {`${visual.amountPrefix}₹${item.amountInr.toLocaleString()}`}
         </Text>
-        <CoinIcon size={14} />
       </View>
     </View>
   );

@@ -4,7 +4,7 @@
  * Returns empty results until the backend is wired. The UI's empty-state
  * card ("No one available right now") is what renders in that case.
  */
-import { Env } from '@core/config/env';
+import { USE_MOCK_DATA } from '@core/config/env';
 import { mapSupabaseError } from '@core/network/apiErrorMapper';
 import { getSupabaseClient } from '@core/network/supabaseClient';
 
@@ -39,7 +39,7 @@ const MOCK_FEMALES: AvailableFemale[] = [
     isOnline: true,
     isNew: false,
     isVerified: true,
-    coinPrice: 80,
+    coinPrice: 15,
     averageResponseMinutes: 2,
     bio: "Hey, I'm Aanya. Let's talk about books, movies, and anything you want! I love sharing travel stories.",
     isFavorited: false,
@@ -55,7 +55,7 @@ const MOCK_FEMALES: AvailableFemale[] = [
     isOnline: true,
     isNew: true,
     isVerified: true,
-    coinPrice: 50,
+    coinPrice: 15,
     averageResponseMinutes: 4,
     bio: 'Music is my life. Tell me your favorite song! Outgoing, friendly, and always up for late night vibes.',
     isFavorited: false,
@@ -71,7 +71,7 @@ const MOCK_FEMALES: AvailableFemale[] = [
     isOnline: true,
     isNew: false,
     isVerified: true,
-    coinPrice: 120,
+    coinPrice: 15,
     averageResponseMinutes: 1,
     bio: "Always up for a good laugh and friendly conversations. Let's keep it light and fun!",
     isFavorited: false,
@@ -87,7 +87,7 @@ const MOCK_FEMALES: AvailableFemale[] = [
     isOnline: false,
     isNew: true,
     isVerified: true,
-    coinPrice: 45,
+    coinPrice: 15,
     averageResponseMinutes: 5,
     bio: "Friendly and talkative. Let's get to know each other! I love pets and coffee.",
     isFavorited: false,
@@ -103,7 +103,7 @@ const MOCK_FEMALES: AvailableFemale[] = [
     isOnline: true,
     isNew: false,
     isVerified: true,
-    coinPrice: 100,
+    coinPrice: 15,
     averageResponseMinutes: 2,
     bio: "Love traveling and nature. Let's talk about our dream destinations!",
     isFavorited: false,
@@ -119,7 +119,7 @@ const MOCK_FEMALES: AvailableFemale[] = [
     isOnline: true,
     isNew: false,
     isVerified: false,
-    coinPrice: 60,
+    coinPrice: 15,
     averageResponseMinutes: 3,
     bio: 'Outgoing and energetic. I respond instantly and love deep talks about philosophy.',
     isFavorited: false,
@@ -135,7 +135,7 @@ const MOCK_FEMALES: AvailableFemale[] = [
     isOnline: false,
     isNew: true,
     isVerified: true,
-    coinPrice: 75,
+    coinPrice: 15,
     averageResponseMinutes: 8,
     bio: 'Into fitness and healthy lifestyles. Hit me up if you want some motivation or just a good chat!',
     isFavorited: false,
@@ -151,7 +151,7 @@ const MOCK_FEMALES: AvailableFemale[] = [
     isOnline: true,
     isNew: false,
     isVerified: true,
-    coinPrice: 40,
+    coinPrice: 15,
     averageResponseMinutes: 6,
     bio: "Let's keep it simple and sweet. I enjoy talking about gaming and tech.",
     isFavorited: false,
@@ -167,7 +167,7 @@ const MOCK_FEMALES: AvailableFemale[] = [
     isOnline: true,
     isNew: false,
     isVerified: true,
-    coinPrice: 90,
+    coinPrice: 15,
     averageResponseMinutes: 2,
     bio: 'Creative mind and free spirit. Artist, dancer, and coffee lover.',
     isFavorited: false,
@@ -182,7 +182,7 @@ export async function browseFemales(
   pageSize = 20,
   offset = 0,
 ): Promise<{ items: ReadonlyArray<AvailableFemale>; hasMore: boolean; totalOnline: number }> {
-  if (Env.devMode) {
+  if (USE_MOCK_DATA) {
     let filtered = MOCK_FEMALES.map(f => ({
       ...f,
       isFavorited: devFavorites.has(f.id),
@@ -257,7 +257,7 @@ export async function browseFemales(
 
 /** Returns the male's favorited females for the horizontal carousel on Home. */
 export async function listFavorites(): Promise<ReadonlyArray<AvailableFemale>> {
-  if (Env.devMode) {
+  if (USE_MOCK_DATA) {
     return MOCK_FEMALES.filter(f => devFavorites.has(f.id)).map(f => ({
       ...f,
       isFavorited: true,
@@ -272,7 +272,7 @@ export async function listFavorites(): Promise<ReadonlyArray<AvailableFemale>> {
 
 /** Toggle a female in/out of the male's favorites. Optimistic by caller. */
 export async function toggleFavorite(femaleId: string): Promise<boolean> {
-  if (Env.devMode) {
+  if (USE_MOCK_DATA) {
     if (devFavorites.has(femaleId)) {
       devFavorites.delete(femaleId);
       return false;
@@ -292,7 +292,7 @@ export async function toggleFavorite(femaleId: string): Promise<boolean> {
 
 /** Fetches a single female profile by id (for Female Profile Preview screen). */
 export async function getFemaleById(femaleId: string): Promise<AvailableFemale | null> {
-  if (Env.devMode) {
+  if (USE_MOCK_DATA) {
     const found = MOCK_FEMALES.find(f => f.id === femaleId);
     if (found) {
       return {
@@ -302,13 +302,68 @@ export async function getFemaleById(femaleId: string): Promise<AvailableFemale |
     }
     return null;
   }
-  const { data, error } = await getSupabaseClient()
-    .from('females')
+  const client = getSupabaseClient();
+  const { data: femaleData, error: femaleError } = await client
+    .from('females_available_view')
     .select('*')
-    .eq('id', femaleId)
+    .eq('female_id', femaleId)
     .maybeSingle();
+
+  if (femaleError) {
+    throw mapSupabaseError(femaleError);
+  }
+  if (!femaleData) {
+    return null;
+  }
+
+  // Fetch if the male has favorited this female
+  const { data: favoriteData, error: favoriteError } = await client
+    .from('favorites')
+    .select('id')
+    .eq('female_id', femaleId)
+    .maybeSingle();
+
+  const isFavorited = !favoriteError && !!favoriteData;
+
+  const mapped: AvailableFemale = {
+    id: femaleData.female_id,
+    name: femaleData.name,
+    age: femaleData.age,
+    rating: Number(femaleData.rating_avg),
+    totalChats: femaleData.total_chats,
+    imageUrl: femaleData.profile_picture_url || '',
+    isOnline: femaleData.is_online,
+    isNew: false,
+    isVerified: true,
+    coinPrice: femaleData.coin_price,
+    averageResponseMinutes: femaleData.average_response_minutes,
+    bio: femaleData.bio || '',
+    isFavorited,
+  };
+
+  return mapped;
+}
+
+/**
+ * Returns the subset of the given female ids that are STILL browseable
+ * (verified + active + online), per `females_available_view`.
+ *
+ * Used by the Male Home grid to reconcile away cards whose "went offline"
+ * realtime event was missed — the local Realtime pipeline drops
+ * postgres_changes, so a force-closed female (swept offline by the backend
+ * cron) would otherwise linger on the grid forever.
+ */
+export async function fetchOnlineFemaleIds(ids: ReadonlyArray<string>): Promise<Set<string>> {
+  if (ids.length === 0) {
+    return new Set();
+  }
+  const { data, error } = await getSupabaseClient()
+    .from('females_available_view')
+    .select('female_id')
+    .in('female_id', ids as string[])
+    .eq('is_online', true);
   if (error) {
     throw mapSupabaseError(error);
   }
-  return (data as AvailableFemale | null) ?? null;
+  return new Set((data ?? []).map(r => (r as { female_id: string }).female_id));
 }

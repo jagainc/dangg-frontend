@@ -8,7 +8,7 @@ import { AppTypography } from '@theme/typography';
 
 import CoinIcon from '@core/components/CoinIcon';
 
-import { type CoinPackage, type CoinPackageTag, totalCoinsFor } from '../constants';
+import { type CoinPackage, totalCoinsFor } from '../constants';
 
 export type CoinPackageCardProps = {
   pkg: CoinPackage;
@@ -16,27 +16,26 @@ export type CoinPackageCardProps = {
   onPress: () => void;
 };
 
-const TAG_LABEL: Record<CoinPackageTag, string> = {
-  popular: 'POPULAR',
-  bestDeal: 'BEST DEAL',
-  maxValue: 'MAX VALUE',
-};
-
-const TAG_COLOR: Record<CoinPackageTag, string> = {
-  popular: AppColors.primary,
-  bestDeal: AppColors.coinGoldDark,
-  maxValue: AppColors.success,
-};
-
 /**
  * Selectable card for a coin package in the Wallet grid.
- *
- * Minimal layout: optional tag ribbon, brand coin, total coins as the hero
- * number, optional bonus line (only when present), price. No per-coin
- * breakdown, no "COINS" label — the icon already says that.
  */
 function CoinPackageCard({ pkg, selected, onPress }: CoinPackageCardProps): React.ReactElement {
   const totalCoins = totalCoinsFor(pkg);
+
+  // Dynamic premium badge labels and colors
+  let tagLabel = '';
+  let tagColor = '';
+
+  if (pkg.id === 'starter') {
+    tagLabel = 'Starter';
+    tagColor = AppColors.info;
+  } else if (pkg.tag === 'popular') {
+    tagLabel = 'Popular';
+    tagColor = AppColors.primary;
+  } else if (pkg.tag === 'bestDeal' || pkg.tag === 'maxValue') {
+    tagLabel = 'Best Value';
+    tagColor = AppColors.coinGold;
+  }
 
   return (
     <Pressable
@@ -49,9 +48,9 @@ function CoinPackageCard({ pkg, selected, onPress }: CoinPackageCardProps): Reac
         pressed && styles.cardPressed,
       ]}
     >
-      {pkg.tag ? (
-        <View style={[styles.tag, { backgroundColor: TAG_COLOR[pkg.tag] }]}>
-          <Text style={styles.tagText}>{TAG_LABEL[pkg.tag]}</Text>
+      {tagLabel ? (
+        <View style={[styles.tag, { backgroundColor: tagColor }]}>
+          <Text style={styles.tagText}>{tagLabel}</Text>
         </View>
       ) : null}
 
@@ -74,42 +73,47 @@ const styles = StyleSheet.create({
     paddingVertical: AppSpacing.lg,
     paddingHorizontal: AppSpacing.sm,
     alignItems: 'center',
-    borderWidth: 1.5,
     gap: AppSpacing.xs,
-    // floating lift
-    shadowOffset: { width: 0, height: 8 },
-    shadowRadius: 18,
-    elevation: 10,
+    position: 'relative',
   },
   cardSelected: {
+    borderWidth: 1.5,
     borderColor: AppColors.primary,
+    // soft pink shadow glow
     shadowColor: AppColors.primary,
-    shadowOpacity: 0.28,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 6,
   },
   cardUnselected: {
-    borderColor: AppColors.border,
+    borderWidth: 0, // borderless
+    // premium soft shadow
     shadowColor: '#000',
-    shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.02,
+    shadowRadius: 10,
+    elevation: 2,
   },
-  cardPressed: { opacity: 0.94 },
+  cardPressed: { opacity: 0.92 },
   tag: {
     position: 'absolute',
     top: 8,
     right: 8,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: AppRadii.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: AppRadii.full,
   },
   tagText: {
     ...AppTypography.labelSmall,
     color: AppColors.onPrimary,
-    fontWeight: '800',
-    letterSpacing: 0.3,
-    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+    fontSize: 9,
   },
   coins: {
     ...AppTypography.titleLarge,
-    color: AppColors.primaryDark,
+    color: AppColors.onSurface,
     fontWeight: '800',
     fontSize: 24,
     marginTop: AppSpacing.xs,
@@ -121,7 +125,7 @@ const styles = StyleSheet.create({
   },
   price: {
     ...AppTypography.titleMedium,
-    color: AppColors.onSurface,
+    color: AppColors.primary,
     fontWeight: '700',
     marginTop: AppSpacing.xs,
   },

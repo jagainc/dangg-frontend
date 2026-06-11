@@ -31,8 +31,20 @@ import { AppSpacing } from '@theme/spacing';
 import { AppTypography } from '@theme/typography';
 
 import ConfirmationDialog from '@core/components/ConfirmationDialog';
+import { USE_MOCK_DATA } from '@core/config/env';
+import { getSupabaseClient } from '@core/network/supabaseClient';
+import { logger } from '@core/utils/logger';
 
 import { type FemaleAppStackParamList } from '@navigation/types';
+
+import {
+  type ChatMessage,
+  endChatSession,
+  getChatSessionForRequest,
+  getChatSessionStatus,
+  listChatMessages,
+  sendChatMessage,
+} from '../api/chatRequestApi';
 
 type Nav = NativeStackNavigationProp<FemaleAppStackParamList, 'ChatSession'>;
 type Route = RouteProp<FemaleAppStackParamList, 'ChatSession'>;
@@ -81,6 +93,19 @@ const MOCK_MESSAGES: ReadonlyArray<MockMessage> = [
 
 const COINS_PER_MESSAGE_EARNED = 5;
 const MOCK_MALE_NAME = 'Amit';
+
+function formatMessageTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function mapChatMessage(message: ChatMessage, selfId: string): MockMessage {
+  return {
+    id: message.id,
+    kind: message.senderId === selfId ? 'sent' : 'received',
+    text: message.body,
+    time: formatMessageTime(message.sentAt),
+  };
+}
 
 function BackIcon(): React.ReactElement {
   return (
@@ -142,6 +167,17 @@ function TypingIndicator(): React.ReactElement {
   );
 }
 
+function DoubleCheckIcon({ size = 12, color = 'rgba(255,255,255,0.7)' }): React.ReactElement {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17l-4.24-4.24-1.41 1.41 5.66 5.66L23.66 7l-1.42-1.41zM.41 13.41L6.07 19.07l1.41-1.41L1.83 12 .41 13.41z"
+        fill={color}
+      />
+    </Svg>
+  );
+}
+
 function MessageBubble({ msg, index }: { msg: MockMessage; index: number }): React.ReactElement {
   const opacity = useSharedValue(0);
   const tx = useSharedValue(msg.kind === 'sent' ? 20 : -20);
@@ -172,9 +208,12 @@ function MessageBubble({ msg, index }: { msg: MockMessage; index: number }): Rea
         >
           {msg.text}
         </Text>
-        <Text style={[styles.timeText, isSent ? styles.timeTextSent : styles.timeTextReceived]}>
-          {msg.time}
-        </Text>
+        <View style={styles.bubbleTimeRow}>
+          <Text style={[styles.timeText, isSent ? styles.timeTextSent : styles.timeTextReceived]}>
+            {msg.time}
+          </Text>
+          {isSent ? <DoubleCheckIcon /> : null}
+        </View>
       </View>
     </Animated.View>
   );
@@ -246,14 +285,21 @@ function ChatHeader({
  */
 function FemaleChatSessionScreen(): React.ReactElement {
   const navigation = useNavigation<Nav>();
-  useRoute<Route>();
+  const route = useRoute<Route>();
 
   const scrollRef = useRef<ScrollView>(null);
   const [inputText, setInputText] = useState('');
-  const [messages, setMessages] = useState<MockMessage[]>([...MOCK_MESSAGES]);
-  const [isTyping, setIsTyping] = useState(true);
+  const [messages, setMessages] = useState<MockMessage[]>(USE_MOCK_DATA ? [...MOCK_MESSAGES] : []);
+  const [isTyping, setIsTyping] = useState(USE_MOCK_DATA);
   const [secondsElapsed, setSecondsElapsed] = useState(0);
   const [endDialog, setEndDialog] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [selfId, setSelfId] = useState<string | null>(null);
+
+  // Disconnect-to-home, invoked either by this user (confirmEnd) or by the poll
+  // when the OTHER participant ends the session. Guarded so it runs once.
+  const disconnectedRef = useRef(false);
+  const remoteEndRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => true);
@@ -265,23 +311,155 @@ function FemaleChatSessionScreen(): React.ReactElement {
     return () => clearInterval(t);
   }, []);
 
+  useEffect(() => {
+    if (USE_MOCK_DATA) {
+      return;
+    }
+
+    let mounted = true;
+    let channel: ReturnType<ReturnType<typeof getSupabaseClient>['channel']> | null = null;
+    let poll: ReturnType<typeof setInterval> | null = null;
+    const client = getSupabaseClient();
+
+    async function bootstrap(): Promise<void> {
+      const { data: userData } = await client.auth.getUser();
+      const currentUserId = userData.user?.id;
+      if (!currentUserId) {
+        return;
+      }
+
+      const session = await getChatSessionForRequest(route.params.requestId);
+      if (!session || !mounted) {
+        return;
+      }
+
+      setSelfId(currentUserId);
+      setSessionId(session.id);
+
+      const history = await listChatMessages(session.id);
+      if (!mounted) {
+        return;
+      }
+      setMessages(history.map(message => mapChatMessage(message, currentUserId)));
+
+      channel = client
+        .channel(`public:chat_messages:chat_session_id=eq.${session.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'chat_messages',
+            filter: `chat_session_id=eq.${session.id}`,
+          },
+          payload => {
+            const row = payload.new as {
+              id: string;
+              chat_session_id: string;
+              sender_id: string;
+              body: string;
+              sent_at: string;
+            };
+            const next = mapChatMessage(
+              {
+                id: row.id,
+                sessionId: row.chat_session_id,
+                senderId: row.sender_id,
+                body: row.body,
+                sentAt: row.sent_at,
+              },
+              currentUserId,
+            );
+            setMessages(prev =>
+              prev.some(message => message.id === next.id) ? prev : [...prev, next],
+            );
+          },
+        )
+        .subscribe();
+
+      // Polling fallback: this local stack's Realtime pipeline does not reliably
+      // deliver postgres_changes, so the realtime INSERT above can silently miss
+      // the other participant's messages. Re-fetch the history every few seconds
+      // and merge anything new (deduped by DB id — sent messages already carry
+      // their real id, so this never duplicates). Guarantees both sides converge.
+      poll = setInterval(() => {
+        void (async () => {
+          if (!mounted) {
+            return;
+          }
+          try {
+            const latest = await listChatMessages(session.id);
+            if (!mounted) {
+              return;
+            }
+            setMessages(prev => {
+              const seen = new Set(prev.map(m => m.id));
+              const additions = latest
+                .filter(m => !seen.has(m.id))
+                .map(m => mapChatMessage(m, currentUserId));
+              return additions.length > 0 ? [...prev, ...additions] : prev;
+            });
+            // If the other participant ended the session, disconnect this side too.
+            const status = await getChatSessionStatus(session.id);
+            if (mounted && status === 'ended') {
+              remoteEndRef.current();
+            }
+          } catch (e) {
+            logger.warn('FemaleChatSessionScreen message poll failed', e);
+          }
+        })();
+      }, 2500);
+    }
+
+    void bootstrap();
+
+    return () => {
+      mounted = false;
+      if (channel) {
+        void client.removeChannel(channel);
+      }
+      if (poll) {
+        clearInterval(poll);
+      }
+    };
+  }, [route.params.requestId]);
+
   const coinsEarned = messages.filter(m => m.kind === 'sent').length * COINS_PER_MESSAGE_EARNED;
 
-  const handleSend = (): void => {
+  const handleSend = async (): Promise<void> => {
     const text = inputText.trim();
     if (!text) {
       return;
     }
+    if (!USE_MOCK_DATA && (!sessionId || !selfId)) {
+      return;
+    }
+
     const newMsg: MockMessage = {
       id: String(Date.now()),
       kind: 'sent',
       text,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
-    setMessages(prev => [...prev, newMsg]);
     setInputText('');
-    setIsTyping(true);
 
+    if (!USE_MOCK_DATA) {
+      try {
+        const inserted = await sendChatMessage(sessionId!, text);
+        const mapped = mapChatMessage(inserted, selfId!);
+        setMessages(prev =>
+          prev.some(message => message.id === mapped.id) ? prev : [...prev, mapped],
+        );
+        setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+      } catch (e) {
+        logger.warn('Failed to send chat message:', e);
+        setInputText(text);
+      }
+      return;
+    }
+
+    setMessages(prev => [...prev, newMsg]);
+    setIsTyping(true);
     setTimeout(() => {
       setIsTyping(false);
       const replies = [
@@ -304,12 +482,27 @@ function FemaleChatSessionScreen(): React.ReactElement {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
   };
 
-  const confirmEnd = (): void => {
-    setEndDialog(false);
+  // Disconnect this screen to Home. Idempotent via disconnectedRef so the
+  // poll and a manual end can't both navigate.
+  remoteEndRef.current = (): void => {
+    if (disconnectedRef.current) {
+      return;
+    }
+    disconnectedRef.current = true;
     navigation.reset({
       index: 0,
       routes: [{ name: 'FemaleTabs', params: { screen: 'Home' } }],
     });
+  };
+
+  const confirmEnd = (): void => {
+    setEndDialog(false);
+    // End the session for BOTH participants, then disconnect this side. The
+    // male's poll sees status='ended' and disconnects too.
+    if (!USE_MOCK_DATA && sessionId) {
+      void endChatSession(sessionId).catch(e => logger.warn('endChatSession failed', e));
+    }
+    remoteEndRef.current();
   };
 
   return (
@@ -366,11 +559,15 @@ function FemaleChatSessionScreen(): React.ReactElement {
             placeholderTextColor={AppColors.onSurfaceMuted}
             multiline
             maxLength={200}
-            onSubmitEditing={handleSend}
+            onSubmitEditing={() => {
+              void handleSend();
+            }}
             returnKeyType="send"
           />
           <Pressable
-            onPress={handleSend}
+            onPress={() => {
+              void handleSend();
+            }}
             style={({ pressed }) => [styles.sendBtn, pressed && styles.sendBtnPressed]}
           >
             <SendIcon />
@@ -457,25 +654,25 @@ const styles = StyleSheet.create({
   headerRightCol: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
   },
   earningsPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 2,
-    backgroundColor: AppColors.success,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: AppRadii.sm,
+    gap: 4,
+    backgroundColor: AppColors.successLight,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: AppRadii.full,
   },
   earningsCurrency: {
     ...AppTypography.labelSmall,
-    color: AppColors.onPrimary,
+    color: AppColors.success,
     fontWeight: '700',
   },
   earningsValue: {
     ...AppTypography.labelSmall,
-    color: AppColors.onPrimary,
+    color: AppColors.success,
     fontWeight: '700',
   },
   endBtn: {
@@ -488,15 +685,22 @@ const styles = StyleSheet.create({
   },
 
   earnPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     alignSelf: 'center',
     marginTop: AppSpacing.sm,
     marginBottom: AppSpacing.xs,
-    backgroundColor: AppColors.surface,
+    backgroundColor: AppColors.successLight,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: AppRadii.full,
-    borderWidth: 1,
-    borderColor: AppColors.success,
+    borderWidth: 0,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.02,
+    shadowRadius: 6,
+    elevation: 1,
   },
   earnPillText: {
     ...AppTypography.labelSmall,
@@ -525,71 +729,93 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
+  // Bubbles
   msgRow: { maxWidth: '78%' },
   msgRowSent: { alignSelf: 'flex-end' },
   msgRowReceived: { alignSelf: 'flex-start' },
   bubble: {
-    paddingHorizontal: AppSpacing.sm + 2,
-    paddingVertical: AppSpacing.xs + 2,
-    borderRadius: 16,
+    borderRadius: AppRadii.lg,
+    paddingHorizontal: AppSpacing.md,
+    paddingVertical: AppSpacing.sm,
+    gap: 2,
   },
   bubbleSent: {
     backgroundColor: AppColors.primary,
     borderBottomRightRadius: 4,
   },
   bubbleReceived: {
-    backgroundColor: AppColors.primarySubtle,
+    backgroundColor: AppColors.surfaceVariant, // clean neutral light-gray background
     borderBottomLeftRadius: 4,
+    borderWidth: 0, // borderless
   },
   bubbleText: {
     ...AppTypography.bodyMedium,
+    lineHeight: 20,
   },
   bubbleTextSent: { color: AppColors.onPrimary },
   bubbleTextReceived: { color: AppColors.onSurface },
+  bubbleTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    gap: 4,
+    marginTop: 2,
+  },
   timeText: {
     ...AppTypography.labelSmall,
     fontSize: 10,
-    marginTop: 2,
-    alignSelf: 'flex-end',
   },
-  timeTextSent: { color: AppColors.onPrimary, opacity: 0.8 },
+  timeTextSent: { color: 'rgba(255,255,255,0.65)' },
   timeTextReceived: { color: AppColors.onSurfaceMuted },
 
   typingBubble: {
     flexDirection: 'row',
-    backgroundColor: AppColors.primarySubtle,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 16,
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: AppColors.surfaceVariant,
+    borderRadius: AppRadii.lg,
     borderBottomLeftRadius: 4,
-    gap: 4,
+    borderWidth: 0,
+    paddingHorizontal: AppSpacing.md,
+    paddingVertical: AppSpacing.sm + 2,
+    alignSelf: 'flex-start',
+    marginTop: AppSpacing.xs,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.02,
+    shadowRadius: 6,
+    elevation: 1,
   },
   typingDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: AppColors.primary,
+    backgroundColor: AppColors.onSurfaceMuted,
     opacity: 0.6,
   },
 
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    paddingHorizontal: AppSpacing.sm,
+    paddingHorizontal: AppSpacing.md,
     paddingVertical: AppSpacing.sm,
-    backgroundColor: AppColors.surface,
+    backgroundColor: AppColors.background,
     gap: AppSpacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: AppColors.divider,
   },
   input: {
     flex: 1,
     minHeight: 44,
-    maxHeight: 120,
+    maxHeight: 100,
+    backgroundColor: AppColors.surface,
+    borderRadius: AppRadii.xl,
     paddingHorizontal: AppSpacing.md,
     paddingVertical: AppSpacing.sm,
-    borderRadius: 22,
-    backgroundColor: AppColors.background,
+    borderWidth: 0,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.02,
+    shadowRadius: 10,
+    elevation: 2,
     ...AppTypography.bodyMedium,
     color: AppColors.onSurface,
   },
@@ -600,8 +826,13 @@ const styles = StyleSheet.create({
     backgroundColor: AppColors.primary,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: AppColors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 6,
   },
-  sendBtnPressed: { opacity: 0.85 },
+  sendBtnPressed: { opacity: 0.82, transform: [{ scale: 0.96 }] },
 });
 
 export default FemaleChatSessionScreen;

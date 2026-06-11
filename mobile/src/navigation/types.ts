@@ -35,6 +35,7 @@ export type FemaleTabParamList = {
 /** Female app stack — tabs as root + push-able secondary screens. */
 export type FemaleAppStackParamList = {
   FemaleTabs: NavigatorScreenParams<FemaleTabParamList>;
+  ChatsInbox: undefined;
   Notifications: undefined;
   ChangePassword: undefined;
   BankUpiUpdate: undefined;
@@ -62,6 +63,7 @@ export type MaleTabParamList = {
 /** Male app stack — tabs as root + push-able secondary screens. */
 export type MaleAppStackParamList = {
   MaleTabs: NavigatorScreenParams<MaleTabParamList>;
+  ChatsInbox: undefined;
   FemaleProfilePreview: { femaleId: string };
   ChatRequestSent: { requestId: string };
   ChatRequestAccepted: { requestId: string };

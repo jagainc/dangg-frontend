@@ -3,7 +3,14 @@ import { type NativeStackNavigationProp } from '@react-navigation/native-stack';
 import React, { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Circle, Path } from 'react-native-svg';
+import Svg, {
+  Circle,
+  Defs,
+  LinearGradient as SvgLinearGradient,
+  Path,
+  Rect,
+  Stop,
+} from 'react-native-svg';
 
 import { AppColors } from '@theme/colors';
 import { AppRadii } from '@theme/radii';
@@ -12,7 +19,6 @@ import { AppSpacing } from '@theme/spacing';
 import { AppTypography } from '@theme/typography';
 
 import BottomSheet from '@core/components/BottomSheet';
-import CoinIcon from '@core/components/CoinIcon';
 import { BOTTOM_NAV_HEIGHT, FAB_PROTRUSION, MIN_PAYOUT_AMOUNT_INR } from '@core/config/constants';
 import { inr } from '@core/utils/formatters';
 import { logger } from '@core/utils/logger';
@@ -37,25 +43,13 @@ const FILTER_LABEL: Record<TransactionFilter, string> = {
   refund: 'Refunds',
 };
 
-function BellIcon({ withDot }: { withDot: boolean }): React.ReactElement {
-  return (
-    <Svg width={24} height={24} viewBox="0 0 24 24">
-      <Path
-        d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"
-        fill={AppColors.primaryDark}
-      />
-      {withDot ? <Circle cx={18} cy={6} r={4} fill={AppColors.error} /> : null}
-    </Svg>
-  );
-}
-
 function ClockIcon(): React.ReactElement {
   return (
     <Svg width={16} height={16} viewBox="0 0 24 24">
       <Path
         d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"
-        fill={AppColors.primaryDark}
-        fillOpacity={0.85}
+        fill="#FFFFFF"
+        fillOpacity={0.9}
       />
     </Svg>
   );
@@ -74,6 +68,10 @@ function EarningsDashboardScreen(): React.ReactElement {
   const [filter, setFilter] = useState<TransactionFilter>('all');
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [cardLayout, setCardLayout] = useState<{ width: number; height: number }>({
+    width: 0,
+    height: 0,
+  });
 
   const loadAll = useCallback(async (active: TransactionFilter): Promise<void> => {
     try {
@@ -125,49 +123,67 @@ function EarningsDashboardScreen(): React.ReactElement {
       >
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Earnings</Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Notifications"
-            hitSlop={12}
-            onPress={() => navigation.navigate('Notifications')}
-            style={styles.bellWrap}
-          >
-            <BellIcon withDot />
-          </Pressable>
         </View>
 
-        <View style={[styles.heroCard, AppShadows.e2]}>
-          <Text style={styles.heroLabel}>Available to withdraw</Text>
-          <View style={styles.heroBalanceRow}>
-            <CoinIcon size={40} />
-            <Text style={styles.heroBalance}>
-              {balance ? balance.availableInr.toLocaleString() : '—'}
-            </Text>
-          </View>
-          <Text style={styles.heroEquivalent}>
-            {balance ? `≈ ${inr(balance.availableInr)}` : '—'}
-          </Text>
-          {balance?.pendingPayoutInr != null ? (
-            <View style={styles.pendingRow}>
-              <ClockIcon />
-              <Text style={styles.pendingText}>
-                ₹{balance.pendingPayoutInr.toLocaleString()} payout in review
-              </Text>
+        <View style={styles.heroCardContainer}>
+          <View
+            style={styles.heroCardContent}
+            onLayout={e => {
+              const { width, height } = e.nativeEvent.layout;
+              setCardLayout({ width, height });
+            }}
+          >
+            {cardLayout.width > 0 && cardLayout.height > 0 ? (
+              <Svg
+                height={cardLayout.height}
+                width={cardLayout.width}
+                viewBox={`0 0 ${cardLayout.width} ${cardLayout.height}`}
+                style={StyleSheet.absoluteFillObject}
+              >
+                <Defs>
+                  <SvgLinearGradient id="heroCardGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <Stop offset="0%" stopColor={AppColors.primaryDark} />
+                    <Stop offset="100%" stopColor={AppColors.primaryLight} />
+                  </SvgLinearGradient>
+                </Defs>
+                <Rect
+                  x={0}
+                  y={0}
+                  width={cardLayout.width}
+                  height={cardLayout.height}
+                  fill="url(#heroCardGrad)"
+                />
+                {/* Decorative elements for depth and premium finish */}
+                <Circle cx={cardLayout.width - 20} cy={20} r={45} fill="#FFFFFF" opacity={0.12} />
+                <Circle cx={30} cy={cardLayout.height - 10} r={30} fill="#FFFFFF" opacity={0.06} />
+              </Svg>
+            ) : null}
+            <Text style={styles.heroLabel}>Available to withdraw</Text>
+            <View style={styles.heroBalanceRow}>
+              <Text style={styles.heroBalance}>{balance ? inr(balance.availableInr) : '—'}</Text>
             </View>
-          ) : (
-            <Pressable
-              accessibilityRole="button"
-              disabled={payoutBlocked}
-              onPress={() => navigation.navigate('PayoutRequest')}
-              style={({ pressed }) => [
-                styles.payoutBtn,
-                pressed && styles.payoutBtnPressed,
-                payoutBlocked && styles.payoutBtnDisabled,
-              ]}
-            >
-              <Text style={styles.payoutBtnLabel}>Request Payout</Text>
-            </Pressable>
-          )}
+            {balance?.pendingPayoutInr != null ? (
+              <View style={styles.pendingRow}>
+                <ClockIcon />
+                <Text style={styles.pendingText}>
+                  {inr(balance.pendingPayoutInr)} payout in review
+                </Text>
+              </View>
+            ) : (
+              <Pressable
+                accessibilityRole="button"
+                disabled={payoutBlocked}
+                onPress={() => navigation.navigate('PayoutRequest')}
+                style={({ pressed }) => [
+                  styles.payoutBtn,
+                  pressed && styles.payoutBtnPressed,
+                  payoutBlocked && styles.payoutBtnDisabled,
+                ]}
+              >
+                <Text style={styles.payoutBtnLabel}>Request Payout</Text>
+              </Pressable>
+            )}
+          </View>
         </View>
 
         <View style={styles.quickStats}>
@@ -175,9 +191,8 @@ function EarningsDashboardScreen(): React.ReactElement {
             <Text style={styles.quickStatLabel}>This Month</Text>
             <View style={styles.statCoinRow}>
               <Text style={styles.quickStatValue}>
-                {balance ? balance.monthEarningsInr.toLocaleString() : '—'}
+                {balance ? inr(balance.monthEarningsInr) : '—'}
               </Text>
-              <CoinIcon size={16} />
             </View>
             {balance ? <Text style={styles.quickStatTrend}>{balance.monthTrend.label}</Text> : null}
           </View>
@@ -185,9 +200,8 @@ function EarningsDashboardScreen(): React.ReactElement {
             <Text style={styles.quickStatLabel}>Lifetime</Text>
             <View style={styles.statCoinRow}>
               <Text style={styles.quickStatValue}>
-                {balance ? balance.lifetimeEarningsInr.toLocaleString() : '—'}
+                {balance ? inr(balance.lifetimeEarningsInr) : '—'}
               </Text>
-              <CoinIcon size={16} />
             </View>
             <Text style={styles.quickStatTrend}>since joining</Text>
           </View>
@@ -269,18 +283,31 @@ const styles = StyleSheet.create({
     ...AppTypography.headlineMedium,
     color: AppColors.primaryDark,
   },
-  bellWrap: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
-  heroCard: {
+  heroCardContainer: {
     marginHorizontal: AppSpacing.md,
     marginTop: AppSpacing.lg,
     borderRadius: AppRadii.xl,
+    backgroundColor: AppColors.primaryDark,
+    // Soft, deep colored glow shadow for premium aesthetics
+    shadowColor: AppColors.primaryDark,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.28,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  heroCardContent: {
+    borderRadius: AppRadii.xl,
+    overflow: 'hidden',
     paddingHorizontal: AppSpacing.lg,
-    paddingVertical: AppSpacing.lg + 4,
-    backgroundColor: AppColors.primaryLight,
+    paddingVertical: AppSpacing.lg + 8,
+    position: 'relative',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
   },
   heroLabel: {
     ...AppTypography.labelLarge,
-    color: AppColors.primaryDark,
+    color: '#FFFFFF',
+    opacity: 0.9,
     letterSpacing: 0.4,
     textTransform: 'uppercase',
     fontSize: 12,
@@ -293,14 +320,9 @@ const styles = StyleSheet.create({
   },
   heroBalance: {
     ...AppTypography.displayLarge,
-    color: AppColors.primaryDark,
+    color: '#FFFFFF',
     fontWeight: '800',
     lineHeight: 56,
-  },
-  heroEquivalent: {
-    ...AppTypography.bodyMedium,
-    color: AppColors.onSurfaceMuted,
-    marginTop: AppSpacing.xs,
   },
   pendingRow: {
     flexDirection: 'row',
@@ -310,8 +332,8 @@ const styles = StyleSheet.create({
   },
   pendingText: {
     ...AppTypography.bodyMedium,
-    color: AppColors.primaryDark,
-    opacity: 0.85,
+    color: '#FFFFFF',
+    opacity: 0.9,
   },
   payoutBtn: {
     marginTop: AppSpacing.md,
