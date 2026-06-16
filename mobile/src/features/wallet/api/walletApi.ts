@@ -1,11 +1,12 @@
 /**
  * Male wallet API — balance, purchases, transactions.
  *
- * Starts with zero coins and empty transaction history until the backend is
- * wired. `processPayment` resolves to a real success in dev (so the demo
- * flow walks end-to-end and credits the wallet store) — production will
- * trigger Razorpay's checkout overlay instead.
+ * `processPayment` opens Razorpay's native checkout overlay on Android and on
+ * real devices; only the iOS Simulator (where the Razorpay SDK can't run) falls
+ * back to a mock payment proof so the create-order → verify → credit flow can
+ * still be exercised.
  */
+import { Platform } from 'react-native';
 import RazorpayCheckout from 'react-native-razorpay';
 
 import { AppColors } from '@theme/colors';
@@ -131,16 +132,16 @@ export async function processPayment(packageId: string): Promise<PaymentOutcome>
     return { ok: false, reason: 'Could not start payment. Please try again.' };
   }
 
-  // 2. Collect the payment proof.
-  //    Razorpay's checkout SDK does NOT run on the iOS Simulator, so DEV builds
-  //    (DEV_MODE=true) simulate a successful payment to exercise the full
-  //    create-order → verify → credit flow on the simulator. Production builds
-  //    (DEV_MODE=false) open the real native Razorpay overlay on a device.
-  //    NOTE: the dev path relies on a server-side verify bypass that MUST be
-  //    removed before launch.
+  // 2. Collect the payment proof by opening Razorpay's native checkout overlay.
+  //    The ONLY platform where the Razorpay SDK can't run is the iOS Simulator,
+  //    so we mock the proof ONLY there (DEV_MODE on iOS). Android (emulator +
+  //    device) and iOS devices always open the real overlay.
+  //    NOTE: the iOS-sim mock path relies on a server-side verify bypass that
+  //    MUST be removed before launch.
+  const useMockProof = Env.devMode && Platform.OS === 'ios';
   let razorpayPaymentId: string;
   let razorpaySignature: string;
-  if (Env.devMode) {
+  if (useMockProof) {
     razorpayPaymentId = `pay_dev_${Date.now()}`;
     razorpaySignature = 'mock_signature_bypass';
   } else {
