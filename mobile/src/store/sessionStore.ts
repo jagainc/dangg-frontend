@@ -1,8 +1,10 @@
 import { type RealtimeChannel, type Session, type SupabaseClient } from '@supabase/supabase-js';
+import { Platform } from 'react-native';
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 
-import { USE_MOCK_DATA } from '@core/config/env';
+import { Env, USE_MOCK_DATA } from '@core/config/env';
+import { fcmService } from '@core/services/fcmService';
 import { logger } from '@core/utils/logger';
 
 import {
@@ -70,6 +72,7 @@ export const useVerificationStatus = (): VerificationStatus =>
 
 let activeChannel: RealtimeChannel | null = null;
 let chatRequestsChannel: RealtimeChannel | null = null;
+let iosLoginAttempted = false;
 
 /**
  * Wires Supabase Auth's `onAuthStateChange` into the store. Returns the
@@ -78,6 +81,36 @@ let chatRequestsChannel: RealtimeChannel | null = null;
 export function subscribeSupabaseAuth(client: SupabaseClient): { unsubscribe: () => void } {
   const { data } = client.auth.onAuthStateChange((_event, session) => {
     const store = useSessionStore.getState();
+
+    // CRITICAL: Clear persisted mock session if we are running against real database (USE_MOCK_DATA === false)
+    if (session && !USE_MOCK_DATA) {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(session.user.id);
+      if (!isUuid) {
+        logger.info('Detected persisted mock session while USE_MOCK_DATA is false. Clearing session...');
+        setTimeout(() => {
+          client.auth.signOut().catch(err => {
+            logger.error('Failed to sign out mock session', err);
+          });
+        }, 0);
+        return;
+      }
+    }
+
+    if (Env.devMode && Platform.OS === 'ios' && !session && !iosLoginAttempted) {
+      iosLoginAttempted = true;
+      setTimeout(() => {
+        client.auth
+          .signInWithPassword({
+            phone: '+919900000101',
+            password: 'Password123!',
+          })
+          .catch(err => {
+            logger.error('iOS auto login failed', err);
+          });
+      }, 0);
+      return;
+    }
+
     store.setSession(session);
 
     if (activeChannel) {
@@ -119,6 +152,12 @@ export function subscribeSupabaseAuth(client: SupabaseClient): { unsubscribe: ()
     // Defer the async hydration so the lock is released first.
     setTimeout(() => {
       void hydrateSessionRoleAndStatus(client, session);
+    }, 0);
+
+    // Register this device's FCM token now that we're authenticated (deferred
+    // so the GoTrue auth lock is released first — same reason as above).
+    setTimeout(() => {
+      void fcmService.syncToken();
     }, 0);
 
     // Subscribe to realtime updates on females table for the current user to get live verification status updates
