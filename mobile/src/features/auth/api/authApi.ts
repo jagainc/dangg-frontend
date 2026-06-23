@@ -368,18 +368,18 @@ export async function submitVerificationPhoto(localPath: string): Promise<string
   if (userErr || !userData.user) {
     throw new AuthException('You must be signed in to submit verification.');
   }
-  const objectPath = `${userData.user.id}/selfie.jpg`;
+  // Path inside the `verification` bucket → R2 key: verification/photos/{uid}/selfie.jpg
+  const objectPath = `photos/${userData.user.id}/selfie.jpg`;
 
   // RN-safe file read: fetch the URI as an ArrayBuffer. Blob upload is
   // unreliable on React Native; ArrayBuffer is the documented path. Pass
-  // through file:// (real device capture) and http(s):// (the simulator's
-  // sample-image fallback, since the iOS Simulator has no camera) as-is;
-  // only a bare filesystem path needs the file:// prefix.
-  const fileUri = /^(file|https?):\/\//.test(localPath) ? localPath : `file://${localPath}`;
+  // through file:// (real device capture), content:// (Android gallery),
+  // and http(s):// (iOS Simulator fallback) as-is.
+  const fileUri = /^(file|content|https?):\/\//.test(localPath) ? localPath : `file://${localPath}`;
   const arrayBuffer = await fetch(fileUri).then(res => res.arrayBuffer());
 
   const { error: uploadErr } = await client.storage
-    .from('verification-photos')
+    .from('verification')
     .upload(objectPath, arrayBuffer, { contentType: 'image/jpeg', upsert: true });
   if (uploadErr) {
     throw mapSupabaseError(uploadErr);

@@ -63,8 +63,9 @@ export async function uploadToR2(
   }
 
   // RN-safe read: fetch the URI as an ArrayBuffer (Blob upload is unreliable on
-  // React Native). file:// and http(s):// pass through; bare paths get file://.
-  const fileUri = /^(file|https?):\/\//.test(localPath) ? localPath : `file://${localPath}`;
+  // React Native). file://, content:// (Android gallery) and http(s):// pass
+  // through; bare paths get file://.
+  const fileUri = /^(file|content|https?):\/\//.test(localPath) ? localPath : `file://${localPath}`;
   const bytes = await fetch(fileUri).then(r => r.arrayBuffer());
 
   const put = await fetch(signed.uploadUrl, {
